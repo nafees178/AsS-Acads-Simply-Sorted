@@ -37,8 +37,15 @@
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 8px rgba(255, 77, 106, 0.3); }
-  50% { box-shadow: 0 0 20px rgba(255, 77, 106, 0.6); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 8px rgba(255, 77, 106, 0.3);
+  }
+
+  50% {
+    box-shadow: 0 0 20px rgba(255, 77, 106, 0.6);
+  }
 }
 
 @layer base {
@@ -59,6 +66,182 @@
     background-color: rgba(124, 58, 237, 0.3);
     color: var(--color-pure);
   }
+
+  /* --- Checkbox --- */
+  input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--color-edge);
+    border-radius: 5px;
+    background-color: var(--color-elevated);
+    cursor: pointer;
+    position: relative;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+  }
+
+  input[type="checkbox"]:hover {
+    border-color: var(--color-indigo);
+    background-color: rgba(124, 58, 237, 0.1);
+  }
+
+  input[type="checkbox"]:checked {
+    background-color: var(--color-indigo);
+    border-color: var(--color-indigo);
+  }
+
+  input[type="checkbox"]:checked::after {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 5px;
+    height: 10px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+  }
+
+  input[type="checkbox"]:focus-visible {
+    outline: 2px solid var(--color-indigo);
+    outline-offset: 2px;
+  }
+
+  /* --- Select / Dropdown --- */
+  select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-color: var(--color-elevated);
+    color: var(--color-silver);
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-button);
+    padding: 8px 36px 8px 12px;
+    font-size: 14px;
+    font-family: var(--font-sans);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394A3B8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 16px;
+  }
+
+  select:hover {
+    border-color: var(--color-indigo);
+    color: var(--color-pure);
+  }
+
+  select:focus {
+    border-color: var(--color-indigo);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+  }
+
+  select option {
+    background-color: var(--color-elevated);
+    color: var(--color-silver);
+    padding: 8px;
+  }
+
+  /* --- Input / Text fields --- */
+  input[type="text"],
+  input[type="email"],
+  input[type="url"],
+  input[type="search"],
+  input[type="number"],
+  input[type="time"],
+  textarea {
+    background-color: var(--color-elevated);
+    color: var(--color-silver);
+    border: 1px solid var(--color-edge);
+    border-radius: var(--radius-button);
+    padding: 8px 12px;
+    font-size: 14px;
+    font-family: var(--font-sans);
+    transition: all 0.15s ease;
+  }
+
+  input[type="text"]:hover,
+  input[type="email"]:hover,
+  input[type="url"]:hover,
+  input[type="search"]:hover,
+  input[type="number"]:hover,
+  input[type="time"]:hover,
+  textarea:hover {
+    border-color: rgba(124, 58, 237, 0.4);
+  }
+
+  input[type="text"]:focus,
+  input[type="email"]:focus,
+  input[type="url"]:focus,
+  input[type="search"]:focus,
+  input[type="number"]:focus,
+  input[type="time"]:focus,
+  textarea:focus {
+    border-color: var(--color-indigo);
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+    color: var(--color-pure);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-slate);
+  }
+
+  /* --- Scrollbar --- */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-edge);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-slate);
+  }
+}
+
+/* --- Toggle Switch Component --- */
+@utility toggle-track {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  background-color: var(--color-elevated);
+  border: 1px solid var(--color-edge);
+  border-radius: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+@utility toggle-track-active {
+  background-color: var(--color-indigo);
+  border-color: var(--color-indigo);
+}
+
+@utility toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background-color: var(--color-pure);
+  border-radius: 50%;
+  transition: transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+@utility toggle-thumb-active {
+  transform: translateX(18px);
 }
 
 @utility glass {
