@@ -206,14 +206,6 @@ export const dashboardStats = {
     aiContentReady: 12,
 };
 
-export const pipelineSteps = [
-    { id: 1, label: 'Extracting Content', status: 'complete' as const },
-    { id: 2, label: 'Analyzing Key Concepts', status: 'complete' as const },
-    { id: 3, label: 'Generating Animations', status: 'active' as const },
-    { id: 4, label: 'Adding Voiceover', status: 'pending' as const },
-    { id: 5, label: 'Finalizing', status: 'pending' as const },
-];
-
 export const navItems = [
     { label: 'Dashboard', path: '/' },
     { label: 'Courses', path: '/courses' },

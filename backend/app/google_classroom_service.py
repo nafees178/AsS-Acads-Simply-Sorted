@@ -15,6 +15,7 @@ from pathlib import Path
 import base64
 import hashlib
 
+import config
 from database import get_vector_db
 from document_processor import DocumentProcessor
 
@@ -41,8 +42,7 @@ class GoogleClassroomService:
         Args:
             credentials_file: Path to Google API credentials JSON file
         """
-        self.credentials_file = credentials_file
-        self.token_file = "token.pickle"
+        self.credentials_file = str(config.CREDENTIALS_FILE)
         self.document_processor = DocumentProcessor()
         
     def get_credentials(self, user_id: str) -> Optional[Credentials]:
@@ -56,7 +56,7 @@ class GoogleClassroomService:
             Credentials object or None if not available
         """
         creds = None
-        token_file = f"token_{user_id}.pickle"
+        token_file = str(config.TOKENS_DIR / f"token_{user_id}.pickle")
         
         # The file token.pickle stores the user's access and refresh tokens.
         if os.path.exists(token_file):
@@ -88,7 +88,7 @@ class GoogleClassroomService:
             user_id: User identifier
             credentials: Credentials object to save
         """
-        token_file = f"token_{user_id}.pickle"
+        token_file = str(config.TOKENS_DIR / f"token_{user_id}.pickle")
         with open(token_file, 'wb') as token:
             pickle.dump(credentials, token)
         logger.info(f"Credentials saved for user {user_id}")
@@ -154,13 +154,13 @@ class GoogleClassroomService:
         """Store PKCE verifier for later use in callback"""
         # In a real application, use proper session storage
         # For now, we'll store it in a simple file
-        verifier_file = f"pkce_verifier_{user_id}.txt"
+        verifier_file = str(config.TOKENS_DIR / f"pkce_verifier_{user_id}.txt")
         with open(verifier_file, 'w') as f:
             f.write(verifier)
     
     def _get_verifier(self, user_id: str) -> Optional[str]:
         """Retrieve stored PKCE verifier"""
-        verifier_file = f"pkce_verifier_{user_id}.txt"
+        verifier_file = str(config.TOKENS_DIR / f"pkce_verifier_{user_id}.txt")
         try:
             with open(verifier_file, 'r') as f:
                 return f.read().strip()
@@ -169,7 +169,7 @@ class GoogleClassroomService:
     
     def _clear_verifier(self, user_id: str):
         """Clear stored PKCE verifier"""
-        verifier_file = f"pkce_verifier_{user_id}.txt"
+        verifier_file = str(config.TOKENS_DIR / f"pkce_verifier_{user_id}.txt")
         try:
             if os.path.exists(verifier_file):
                 os.remove(verifier_file)

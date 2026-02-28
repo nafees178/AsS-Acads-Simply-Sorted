@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import List, Optional
 import os
@@ -8,12 +8,22 @@ import uuid
 import logging
 from datetime import datetime
 
+import sys
+import config
+
+if str(config.APP_DIR) not in sys.path:
+    sys.path.append(str(config.APP_DIR))
+if str(config.VIDEO_GEN_DIR) not in sys.path:
+    sys.path.append(str(config.VIDEO_GEN_DIR))
+
 # Import our modules
 from database import get_vector_db, init_vector_db
 from document_processor import DocumentProcessor
 from user_manager import UserManager
 from search_engine import SearchEngine
 from google_classroom_service import GoogleClassroomService
+
+from videoGen.router import router as video_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,7 +39,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],  # Explicit origins required when allow_credentials=True
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -38,6 +48,9 @@ app.add_middleware(
 # Initialize components
 document_processor = DocumentProcessor()
 user_manager = UserManager()
+
+# Include Video Generation Sub-App router
+app.include_router(video_router, prefix="/video", tags=["Video Generation"])
 
 # We'll get the vector_db instance when needed in each endpoint
 
@@ -197,10 +210,11 @@ async def delete_document(document_id: str, user_id: str):
 async def get_google_classroom_auth_url(user_id: str):
     """Get Google Classroom OAuth2 authorization URL"""
     try:
-        # Validate user exists
+        # Validate user exists or auto-create
         user = await user_manager.get_user(user_id)
         if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+            logger.info(f"User {user_id} not found, auto-creating for login flow")
+            user = await user_manager.create_user(user_id, f"User {user_id}", f"{user_id}@example.com")
         
         # Initialize Google Classroom service
         classroom_service = GoogleClassroomService()
@@ -227,10 +241,11 @@ async def google_classroom_callback(code: str = None, state: str = None):
         
         user_id = state
         
-        # Validate user exists
+        # Validate user exists or auto-create
         user = await user_manager.get_user(user_id)
         if not user:
-            raise HTTPException(status_code=404, detail="User not found")
+            logger.info(f"User {user_id} not found during callback, auto-creating")
+            user = await user_manager.create_user(user_id, f"User {user_id}", f"{user_id}@example.com")
         
         # Reconstruct authorization response URL - use the full URL from Google
         from urllib.parse import urlencode, quote
@@ -259,10 +274,7 @@ async def google_classroom_callback(code: str = None, state: str = None):
         success = classroom_service.handle_oauth_callback(user_id, full_url)
         
         if success:
-            return {
-                "message": "Google Classroom authorization successful",
-                "user_id": user_id
-            }
+            return RedirectResponse(url="http://localhost:5173/")
         else:
             raise HTTPException(status_code=400, detail="Google Classroom authorization failed")
         

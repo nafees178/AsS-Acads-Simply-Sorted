@@ -1,6 +1,7 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Navbar } from './components/shared/Navbar';
+import { LoginModal } from './components/shared/LoginModal';
 import Dashboard from './pages/Dashboard';
 import Courses from './pages/Courses';
 import Schedule from './pages/Schedule';
@@ -12,6 +13,7 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       <div className="min-h-screen bg-obsidian">
+        <LoginModal />
         <Navbar />
         <main className="pt-20 pb-24 px-4 sm:px-6 mx-auto max-w-[1440px]">
           <Routes>

@@ -1,0 +1,7 @@
+# This file is used internally by FFMPEG.
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/DerivativeChainRule/1584795214_1618464428_223132457.mp4'
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/DerivativeChainRule/4072820271_848476926_89665999.mp4'
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/DerivativeChainRule/4072820271_2834709167_2780293215.mp4'
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/DerivativeChainRule/4072820271_1069499923_4198661988.mp4'
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/DerivativeChainRule/4072820271_2688941364_1485867246.mp4'
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/DerivativeChainRule/4072820271_2834709167_4240583119.mp4'

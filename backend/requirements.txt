@@ -7,7 +7,7 @@ PyPDF2==3.0.1
 python-pptx==0.6.21
 python-docx==0.8.11
 pdf2image==1.16.0
-pytesseract==0.3.10
+# pytesseract==0.3.10
 
 # Google AI
 google-generativeai==0.3.2
@@ -18,8 +18,8 @@ google-auth-httplib2==0.1.1
 google-auth-oauthlib==1.2.0
 
 # Text processing and embeddings
-langchain==0.0.354
-langchain-text-splitters==1.1.1
+# langchain==0.0.354
+# langchain-text-splitters==1.1.1
 
 # Additional utilities
 python-multipart==0.0.6

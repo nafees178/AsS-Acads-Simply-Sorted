@@ -5,8 +5,15 @@ import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
+import os
+import config
+
 # Configure Google AI
-genai.configure(api_key="AIzaSyAWKOQzKrlYcVy-uFxdmcK5QWlt1LU-gaI")
+gemini_key = os.getenv("GEMINI_API_KEY")
+if gemini_key:
+    genai.configure(api_key=gemini_key)
+else:
+    genai.configure(api_key="AIzaSyAWKOQzKrlYcVy-uFxdmcK5QWlt1LU-gaI")  # fallback
 
 # Google AI Models
 EMBED_MODEL = "models/embedding-001"

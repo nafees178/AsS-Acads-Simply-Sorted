@@ -6,10 +6,12 @@ from typing import Optional, List, Dict, Any
 import uuid
 from datetime import datetime
 
+import config
+
 logger = logging.getLogger(__name__)
 
 # Configuration
-DB_PATH = os.getenv("DB_PATH", "documents.db")
+DB_PATH = str(config.DB_PATH)
 
 class VectorDatabase:
     def __init__(self):

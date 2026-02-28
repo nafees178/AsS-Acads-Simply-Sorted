@@ -1,0 +1,7 @@
+# This file is used internally by FFMPEG.
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/SummationNotation/1584795214_516522233_223132457.mp4'
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/SummationNotation/4072820271_2834709167_4064443795.mp4'
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/SummationNotation/4072820271_2723386398_3714422957.mp4'
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/SummationNotation/4072820271_2834709167_520145802.mp4'
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/SummationNotation/4072820271_2425948170_1845011947.mp4'
+file 'file:C:/Users/Nafees/Desktop/Projects/WebDev/Ass/AsS-Acads-Simply-Sorted/backend/app/videoGen/.agents/skills/manimce-best-practices/media/videos/math_visualization/480p15/partial_movie_files/SummationNotation/4072820271_2834709167_3347512742.mp4'
