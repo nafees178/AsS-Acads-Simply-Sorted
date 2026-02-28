@@ -31,11 +31,11 @@ EMBED_MODEL = "models/embedding-001"
 
 class DocumentProcessor:
     def __init__(self):
-        # Initialize text splitter with better configuration for larger documents
+        # Initialize text splitter with optimal configuration for detailed analysis
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=500,      # Smaller chunks for better semantic analysis
-            chunk_overlap=100,   # Less overlap to avoid redundancy
-            separators=["\n\n", "\n", ". ", " ", ""]  # Better separators for sentence boundaries
+            chunk_size=300,      # Even smaller chunks for better semantic granularity
+            chunk_overlap=50,    # Reduced overlap for more distinct chunks
+            separators=["\n\n", "\n", ". ", "; ", ", ", " ", ""]  # More granular separators
         )
         
     def extract_digital_pages(self, file_path: str):
@@ -62,15 +62,21 @@ class DocumentProcessor:
             return []
 
     def extract_scanned_pages(self, file_path: str):
-        """Extract text from scanned PDF pages using Gemini Vision"""
+        """Extract text from scanned PDF pages using Gemini Vision with detailed analysis"""
         try:
             images = convert_from_path(file_path, dpi=300)
             model = genai.GenerativeModel(VISION_MODEL)
             pages = []
 
             for i, img in enumerate(images):
-                logger.info(f"OCR page {i+1}")
-                prompt = "Extract all readable text from this page. Do NOT summarize."
+                logger.info(f"Analyzing page {i+1} with Gemini Vision")
+                prompt = """Extract all readable text from this page. Also describe any images, charts, diagrams, or visual elements present. 
+                Provide a detailed analysis including:
+                1. All readable text content
+                2. Description of any images or visual elements
+                3. Any charts, graphs, or diagrams with their content
+                4. Overall context and meaning of the page
+                Do NOT summarize - provide comprehensive details."""
                 response = model.generate_content([prompt, img])
                 pages.append((i+1, response.text))
 
@@ -111,19 +117,50 @@ class DocumentProcessor:
             return ""
     
     def extract_text_from_pptx(self, file_path: str) -> str:
-        """Extract text from PowerPoint file"""
+        """Extract text from PowerPoint file with image analysis"""
         try:
             text = ""
             presentation = Presentation(file_path)
             
             for slide_num, slide in enumerate(presentation.slides, 1):
                 slide_text = ""
+                image_descriptions = []
+                
+                # Extract text from shapes
                 for shape in slide.shapes:
                     if hasattr(shape, "text"):
                         slide_text += shape.text + "\n"
+                    
+                    # Extract and analyze images
+                    if shape.shape_type == 13:  # Picture shape type
+                        try:
+                            # Extract image from slide
+                            image = shape.image
+                            image_bytes = image.blob
+                            
+                            # Analyze image with Gemini Vision
+                            model = genai.GenerativeModel(VISION_MODEL)
+                            prompt = """Analyze this image and provide:
+                            1. Detailed description of what you see
+                            2. Any text visible in the image
+                            3. Charts, graphs, or diagrams with their meaning
+                            4. Overall context and relevance to the presentation"""
+                            
+                            response = model.generate_content([prompt, image_bytes])
+                            image_descriptions.append(f"Image analysis: {response.text}")
+                            
+                        except Exception as img_error:
+                            logger.warning(f"Could not analyze image on slide {slide_num}: {str(img_error)}")
                 
-                if slide_text.strip():
-                    text += f"Slide {slide_num}:\n{slide_text}\n\n"
+                # Combine text and image descriptions
+                if slide_text.strip() or image_descriptions:
+                    slide_content = f"Slide {slide_num}:\n"
+                    if slide_text.strip():
+                        slide_content += f"Text content:\n{slide_text}\n"
+                    if image_descriptions:
+                        slide_content += f"Image descriptions:\n" + "\n".join(image_descriptions) + "\n"
+                    slide_content += "\n"
+                    text += slide_content
             
             return text
             
@@ -132,21 +169,44 @@ class DocumentProcessor:
             return ""
     
     def extract_text_from_docx(self, file_path: str) -> str:
-        """Extract text from Word document"""
+        """Extract text from Word document with image analysis"""
         try:
             text = ""
             doc = docx.Document(file_path)
             
+            # Extract text from paragraphs
             for para_num, paragraph in enumerate(doc.paragraphs, 1):
                 if paragraph.text.strip():
                     text += f"Paragraph {para_num}: {paragraph.text}\n"
             
-            # Also extract text from tables
+            # Extract text from tables
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         if cell.text.strip():
                             text += f"Table cell: {cell.text}\n"
+            
+            # Extract and analyze images
+            for rel in doc.part.rels.values():
+                if "image" in rel.reltype:
+                    try:
+                        # Get image data
+                        image_part = rel.target_part
+                        image_bytes = image_part.blob
+                        
+                        # Analyze image with Gemini Vision
+                        model = genai.GenerativeModel(VISION_MODEL)
+                        prompt = """Analyze this image and provide:
+                        1. Detailed description of what you see
+                        2. Any text visible in the image
+                        3. Charts, graphs, or diagrams with their meaning
+                        4. Overall context and relevance to the document"""
+                        
+                        response = model.generate_content([prompt, image_bytes])
+                        text += f"Image analysis: {response.text}\n\n"
+                        
+                    except Exception as img_error:
+                        logger.warning(f"Could not analyze image in DOCX: {str(img_error)}")
             
             return text
             

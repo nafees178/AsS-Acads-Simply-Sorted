@@ -80,17 +80,21 @@ class SearchEngine:
                     except:
                         slide_num = "Unknown"
                 
-                # Create enhanced content with page/slide number and document name
-                enhanced_content = f"Document: {filename}"
+                # Create searched_index with page/slide number and document name
+                searched_index = f"Document: {filename}"
                 if page_num:
-                    enhanced_content += f", Page: {page_num}"
+                    searched_index += f", Page: {page_num}"
                 elif slide_num:
-                    enhanced_content += f", Slide: {slide_num}"
+                    searched_index += f", Slide: {slide_num}"
+                
+                # Summarize the content (take first 200 characters)
+                summarized_content = content[:200] + "..." if len(content) > 200 else content
                 
                 enhanced_result = {
                     "document_id": result["document_id"],
                     "filename": filename,
-                    "content": enhanced_content,  # Changed to show page number and document name
+                    "content": summarized_content,  # Actual content (summarized)
+                    "searched_index": searched_index,  # Document name and page/slide number
                     "score": result["score"],
                     "metadata": result["metadata"]
                 }
