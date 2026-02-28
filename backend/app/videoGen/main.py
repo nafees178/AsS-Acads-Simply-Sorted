@@ -161,16 +161,36 @@ def main():
 
     rendered_clips = {}
 
-    # Render Manim scenes (with auto-fix)
+    # Render Manim scenes (single attempt, no Gemini fix retries)
     if result["manim_scenes"]:
-        manim_clips = render_manim_scenes(
+        manim_clips, failed_manim = render_manim_scenes(
             output_dir,
             result["manim_scenes"],
-            fix_callback=agent.fix_manim_code,
         )
         rendered_clips.update(manim_clips)
 
-    # Render Remotion scenes
+        # Fallback: generate & render Remotion for any failed Manim scenes
+        if failed_manim:
+            print(f"\n   {len(failed_manim)} Manim scene(s) failed — falling back to Remotion")
+            for failed_scene, error_text in failed_manim:
+                try:
+                    fallback = agent.generate_remotion_fallback(
+                        result["scene_plan"], failed_scene, error_text
+                    )
+                    if fallback:
+                        root_tsx, comp_tsx = fallback
+                        save_remotion_files(output_dir, root_tsx, comp_tsx)
+                        fallback_clip = render_remotion_scenes(
+                            output_dir, [failed_scene]
+                        )
+                        rendered_clips.update(fallback_clip)
+                        # Update scene metadata
+                        failed_scene["engine"] = "REMOTION"
+                        print(f"   Scene {failed_scene['index']}: Remotion fallback successful")
+                except Exception as e:
+                    print(f"   Scene {failed_scene['index']}: Remotion fallback also failed: {e}")
+
+    # Render originally-planned Remotion scenes
     if result["remotion_scenes"]:
         remotion_clips = render_remotion_scenes(
             output_dir,

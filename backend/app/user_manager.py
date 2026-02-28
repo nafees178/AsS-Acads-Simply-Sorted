@@ -21,7 +21,7 @@ class UserManager:
             if not self.vector_db:
                 await self.init()
             
-            with sqlite3.connect(self.vector_db.db_path) as conn:
+            with self.vector_db.get_core_conn() as conn:
                 cursor = conn.cursor()
                 
                 # Check if user already exists
@@ -49,6 +49,58 @@ class UserManager:
         except Exception as e:
             logger.error(f"Error creating user: {str(e)}")
             raise e
+
+    async def upsert_user(self, user_id: str, name: str, email: str, picture: str = None) -> Dict[str, Any]:
+        """Create or update a user from Google profile"""
+        try:
+            if not self.vector_db:
+                await self.init()
+            
+            with self.vector_db.get_core_conn() as conn:
+                cursor = conn.cursor()
+                
+                # Check if user exists
+                cursor.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+                user = cursor.fetchone()
+                
+                if user:
+                    # Update existing user
+                    cursor.execute('''
+                        UPDATE users 
+                        SET name = ?, email = ?
+                        WHERE user_id = ?
+                    ''', (name, email, user_id))
+                    logger.info(f"Updated user from Google profile: {user_id}")
+                else:
+                    # Create new user
+                    created_at = datetime.utcnow().isoformat()
+                    cursor.execute('''
+                        INSERT INTO users (user_id, name, email, created_at)
+                        VALUES (?, ?, ?, ?)
+                    ''', (user_id, name, email, created_at))
+                    logger.info(f"Created new user from Google profile: {user_id}")
+                
+                conn.commit()
+                return await self.get_user(user_id)
+                
+        except Exception as e:
+            logger.error(f"Error upserting user: {str(e)}")
+            raise e
+
+    async def get_user_document_count(self, user_id: str) -> int:
+        """Get the number of documents for a user"""
+        try:
+            if not self.vector_db:
+                await self.init()
+            
+            with self.vector_db.get_core_conn() as conn:
+                cursor = conn.cursor()
+                cursor.execute('SELECT COUNT(*) FROM documents WHERE user_id = ?', (user_id,))
+                count = cursor.fetchone()[0]
+                return count
+        except Exception as e:
+            logger.error(f"Error getting document count: {str(e)}")
+            return 0
     
     async def get_user(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get user information"""
@@ -56,7 +108,7 @@ class UserManager:
             if not self.vector_db:
                 await self.init()
             
-            with sqlite3.connect(self.vector_db.db_path) as conn:
+            with self.vector_db.get_core_conn() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -84,7 +136,7 @@ class UserManager:
             if not self.vector_db:
                 await self.init()
             
-            with sqlite3.connect(self.vector_db.db_path) as conn:
+            with self.vector_db.get_core_conn() as conn:
                 cursor = conn.cursor()
                 
                 # Check if user exists
@@ -122,11 +174,14 @@ class UserManager:
             if not self.vector_db:
                 await self.init()
             
-            with sqlite3.connect(self.vector_db.db_path) as conn:
+            # Step 1: Delete user's documents from Vector Store (embeddings.db)
+            user_docs = await self.vector_db.get_user_documents(user_id)
+            for doc in user_docs:
+                await self.vector_db.delete_document(user_id, doc["document_id"])
+
+            # Step 2: Delete user from Core Store (core.db)
+            with self.vector_db.get_core_conn() as conn:
                 cursor = conn.cursor()
-                
-                # Delete user's documents and chunks (CASCADE will handle chunks)
-                cursor.execute('DELETE FROM documents WHERE user_id = ?', (user_id,))
                 cursor.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
                 
                 conn.commit()
@@ -143,7 +198,7 @@ class UserManager:
             if not self.vector_db:
                 await self.init()
             
-            with sqlite3.connect(self.vector_db.db_path) as conn:
+            with self.vector_db.get_core_conn() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''

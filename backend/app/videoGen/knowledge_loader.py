@@ -330,33 +330,44 @@ Output in separate code blocks:
 """
 
 
-def get_fix_manim_prompt(code: str, error: str, attempt: int) -> str:
-    """Return the prompt for fixing broken Manim code given an error."""
-    return f"""The following ManimCE Python code failed to render. Fix the error and return
-the COMPLETE corrected code.
+def get_remotion_fallback_prompt(scene_plan: str, failed_scene: dict, error: str) -> str:
+    """Return the prompt for generating Remotion code as a fallback for a failed Manim scene."""
+    return f"""A Manim scene FAILED to render. Generate Remotion (React/TypeScript) code
+to create the SAME scene content instead.
 
-## FIX ATTEMPT {attempt}/3
+## FAILED MANIM SCENE
+- Scene {failed_scene['index']}: {failed_scene['title']}
+- Original engine: MANIM (failed)
+- Manim class name: {failed_scene['class_name']}
+- Error: {error[:500]}
 
-## ERROR
+## SCENE DESCRIPTION
+{failed_scene.get('description', 'No description available')}
+
+## FULL SCENE PLAN (for context)
+{scene_plan}
+
+## REQUIREMENTS
+Generate TWO files:
+
+### 1. Root.tsx
+- The main export MUST be named `RemotionRoot`: `export const RemotionRoot: React.FC = () => ...`
+- Register ONE Composition for this scene
+- Composition id MUST be: {failed_scene['comp_id']}
+- 1920x1080, 30fps, durationInFrames=450 (15 seconds)
+
+### 2. MyComp.tsx
+- Create ONE React component: {failed_scene['comp_name']}
+- Recreate the SAME educational content that the Manim scene was supposed to show
+- Use `useCurrentFrame()`, `interpolate()`, `spring()`
+- Dark background (#1C1C1C), vibrant colors
+- Smooth animations and transitions
+
+Output in separate code blocks:
+```tsx
+// Root.tsx
 ```
-{error}
+```tsx
+// MyComp.tsx
 ```
-
-## BROKEN CODE
-```python
-{code}
-```
-
-## COMMON FIXES
-- `.hide()` does NOT exist in ManimCE → use `.set_opacity(0)`
-- `GrowArrow(arrow)` crashes on colored arrows → use `Create(arrow)`
-- Use raw strings for LaTeX: `MathTex(r"\\frac{{1}}{{2}}")`
-- `Axes` has no `get_z_axis_label` → only for `ThreeDAxes`
-- `TracedPath` needs a callable, not a point
-- Don't use deprecated methods or non-existent attributes
-
-## RULES
-- Return the ENTIRE fixed Python file, not just the changed part
-- Output ONLY Python code in a single ```python code block
-- Do NOT add any explanation, just the code
 """

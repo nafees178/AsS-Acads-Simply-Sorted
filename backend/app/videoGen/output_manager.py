@@ -101,29 +101,28 @@ def _get_env_with_miktex() -> dict:
 def render_manim_scenes(
     output_dir: Path,
     manim_scenes: list[dict],
-    fix_callback=None,
-    max_retries: int = 3,
-) -> dict[int, Path]:
+) -> tuple[dict[int, Path], list[dict]]:
     """
-    Render each Manim Scene class as an individual clip.
+    Render each Manim Scene class as an individual clip (single attempt).
 
     Args:
         output_dir: Directory containing scene.py
         manim_scenes: List of scene dicts with 'index' and 'class_name'
-        fix_callback: Optional auto-fix callable
-        max_retries: Max fix attempts per scene
 
     Returns:
-        Dict mapping scene index to rendered clip path
+        Tuple of (rendered clips dict, failed scenes list).
+        - rendered: Dict mapping scene index to rendered clip path
+        - failed: List of (scene_dict, error_text) for scenes that failed
     """
     scene_py = output_dir / "scene.py"
     if not scene_py.exists():
         print("   scene.py not found, skipping Manim render")
-        return {}
+        return {}, list(manim_scenes)
 
     env = _get_env_with_miktex()
     clips_dir = output_dir / "clips"
     rendered = {}
+    failed = []
 
     for scene in manim_scenes:
         class_name = scene["class_name"]
@@ -132,56 +131,51 @@ def render_manim_scenes(
 
         print(f"\n   Rendering Manim Scene {scene_idx}: {class_name}...")
 
-        for attempt in range(1, max_retries + 1):
-            try:
-                result = subprocess.run(
-                    [sys.executable, "-m", "manim", "-qh", "scene.py", class_name],
-                    cwd=str(output_dir),
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "manim", "-qh", "scene.py", class_name],
+                cwd=str(output_dir),
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
 
-                if result.returncode == 0:
-                    # Find rendered MP4
-                    media_dir = output_dir / "media" / "videos" / "scene" / "1080p60"
-                    mp4_files = list(media_dir.glob(f"{class_name}.mp4")) if media_dir.exists() else []
-                    if mp4_files:
-                        shutil.copy2(mp4_files[0], clip_path)
-                        status = f" (fixed on attempt {attempt})" if attempt > 1 else ""
-                        print(f"   Rendered: clip_{scene_idx:02d}.mp4{status}")
-                        rendered[scene_idx] = clip_path
-                    else:
-                        print(f"   Scene {scene_idx} rendered but MP4 not found")
-                    break  # Move to next scene
+            if result.returncode == 0:
+                # Find rendered MP4
+                media_dir = output_dir / "media" / "videos" / "scene" / "1080p60"
+                mp4_files = list(media_dir.glob(f"{class_name}.mp4")) if media_dir.exists() else []
+                if mp4_files:
+                    shutil.copy2(mp4_files[0], clip_path)
+                    print(f"   Rendered: clip_{scene_idx:02d}.mp4")
+                    rendered[scene_idx] = clip_path
                 else:
-                    error_text = result.stderr.strip() or result.stdout.strip()
-                    error_lines = error_text.split("\n")[-30:]
-                    error_summary = "\n".join(error_lines)
+                    print(f"   Scene {scene_idx} rendered but MP4 not found — will fall back to Remotion")
+                    failed.append((scene, "MP4 file not found after successful render"))
+            else:
+                error_text = result.stderr.strip() or result.stdout.strip()
+                error_lines = error_text.split("\n")[-30:]
+                error_summary = "\n".join(error_lines)
 
-                    print(f"   Scene {scene_idx} failed (attempt {attempt}/{max_retries})")
-                    for line in error_lines[-2:]:
-                        print(f"      {line.strip()}")
+                print(f"   Scene {scene_idx} FAILED — will fall back to Remotion")
+                for line in error_lines[-2:]:
+                    print(f"      {line.strip()}")
 
-                    if fix_callback and attempt < max_retries:
-                        current_code = scene_py.read_text(encoding="utf-8")
-                        fixed_code = fix_callback(current_code, error_summary, attempt)
-                        scene_py.write_text(fixed_code, encoding="utf-8")
-                        print("   Code fixed — retrying...")
-                    else:
-                        if attempt == max_retries:
-                            print(f"   Scene {scene_idx}: all fix attempts exhausted")
-                        break
+                failed.append((scene, error_summary))
 
-            except subprocess.TimeoutExpired:
-                print(f"   Scene {scene_idx} timed out")
-                break
-            except FileNotFoundError:
-                print("   Manim not installed or not on PATH")
-                return rendered
+        except subprocess.TimeoutExpired:
+            print(f"   Scene {scene_idx} timed out — will fall back to Remotion")
+            failed.append((scene, "Manim render timed out (>300s)"))
+        except FileNotFoundError:
+            print("   Manim not installed or not on PATH — all remaining scenes will fall back")
+            # Mark this and all remaining scenes as failed
+            failed.append((scene, "Manim not installed or not on PATH"))
+            remaining = [s for s in manim_scenes if s["index"] > scene_idx]
+            for s in remaining:
+                failed.append((s, "Manim not installed or not on PATH"))
+            break
 
-    return rendered
+    return rendered, failed
 
 
 def render_remotion_scenes(
@@ -230,6 +224,12 @@ def render_remotion_scenes(
         clip_path = clips_dir / f"clip_{scene_idx:02d}.mp4"
 
         print(f"\n   Rendering Remotion Scene {scene_idx}: {comp_id}...")
+
+        # Sanity check: is this ID in Root.tsx?
+        if root_tsx.exists():
+            root_content = root_tsx.read_text(encoding="utf-8")
+            if f'id="{comp_id}"' not in root_content and f"id='{comp_id}'" not in root_content:
+                print(f"      WARNING: Composition ID '{comp_id}' not found in Root.tsx! Rendering will likely fail.")
 
         try:
             result = subprocess.run(

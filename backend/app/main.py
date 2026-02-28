@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
@@ -13,6 +13,7 @@ import config
 
 if str(config.APP_DIR) not in sys.path:
     sys.path.append(str(config.APP_DIR))
+
 if str(config.VIDEO_GEN_DIR) not in sys.path:
     sys.path.append(str(config.VIDEO_GEN_DIR))
 
@@ -22,8 +23,11 @@ from document_processor import DocumentProcessor
 from user_manager import UserManager
 from search_engine import SearchEngine
 from google_classroom_service import GoogleClassroomService
+from syllabus_mapper import SyllabusMapper
 
 from videoGen.router import router as video_router
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -82,6 +86,47 @@ async def create_user(user: User):
         logger.error(f"Error creating user: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+class GoogleLoginRequest(BaseModel):
+    credential: str
+
+@app.post("/auth/google-login")
+async def google_login(request: GoogleLoginRequest):
+    """Verify Google JWT and upsert user"""
+    try:
+        # Verify the JWT
+        # NOTE: CLIENT_ID should be the web client ID from credentials.json
+        with open(config.CREDENTIALS_FILE, 'r') as f:
+            import json
+            client_id = json.load(f)['web']['client_id']
+            
+        idinfo = id_token.verify_oauth2_token(
+            request.credential, 
+            google_requests.Request(), 
+            audience=client_id,
+            clock_skew_in_seconds=10
+        )
+        
+        # ID token is valid. Get the user's Google ID from the `sub` claim.
+        user_id = idinfo['sub']
+        email = idinfo.get('email')
+        name = idinfo.get('name')
+        picture = idinfo.get('picture')
+        
+        # Upsert the user in our database
+        user = await user_manager.upsert_user(user_id, name, email, picture)
+        
+        return {
+            "user": user,
+            "message": "Login successful"
+        }
+    except ValueError as e:
+        # Invalid token
+        logger.error(f"Invalid Google token: {str(e)}")
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+    except Exception as e:
+        logger.error(f"Error during Google login: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/users/{user_id}", response_model=User)
 async def get_user(user_id: str):
     """Get user information"""
@@ -133,11 +178,44 @@ async def upload_document(
             "document_id": document_id,
             "filename": filename,
             "chunks_processed": result["chunks_processed"],
-            "processing_time": result["processing_time"]
+            "processing_time": result["processing_time"],
+            "summary": result.get("summary", "")
         }
         
     except Exception as e:
         logger.error(f"Error uploading document: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/syllabus/map")
+async def map_syllabus(
+    user_id: str = Form(...),
+    document_id: Optional[str] = Form(None),
+    course_id: Optional[str] = Form(None),
+    syllabus_text: str = Form(...)
+):
+    """Map a syllabus to a user document"""
+    try:
+        # Validate user exists
+        user = await user_manager.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+            
+        vector_db = await get_vector_db()
+        mapper = SyllabusMapper(vector_db)
+        
+        # Guard: Check if user has documents
+        doc_count = await user_manager.get_user_document_count(user_id)
+        if doc_count == 0:
+            return {
+                "success": False,
+                "error": "Your library is empty. Please add at least one document to AsS before mapping your syllabus."
+            }
+
+        result = await mapper.map_syllabus(user_id, document_id, syllabus_text, course_id)
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error mapping syllabus: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/documents/{user_id}")
@@ -148,6 +226,40 @@ async def list_user_documents(user_id: str):
         return {"documents": documents}
     except Exception as e:
         logger.error(f"Error listing documents: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/documents/download/{document_id}")
+async def download_document(document_id: str):
+    """Download a processed document"""
+    try:
+        vector_db = await get_vector_db()
+        # We need the filename for the download response
+        # To avoid a new DB query method, let's fetch all users or we can just fetch the filename directly from SQLite
+        import sqlite3
+        with sqlite3.connect(config.DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT filename FROM documents WHERE document_id = ?", (document_id,))
+            row = cursor.fetchone()
+            
+        if not row:
+            raise HTTPException(status_code=404, detail="Document not found in database")
+            
+        filename = row[0]
+        file_path = config.UPLOADS_DIR / document_id
+        
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="Document file not found on disk")
+            
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=file_path,
+            filename=filename,
+            media_type="application/octet-stream"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error downloading document: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/search/")
@@ -286,7 +398,7 @@ async def google_classroom_callback(code: str = None, state: str = None):
         raise HTTPException(status_code=500, detail=f"Callback error: {str(e)}")
 
 @app.get("/google-classroom/courses/{user_id}")
-async def get_user_courses(user_id: str):
+async def get_user_courses(user_id: str, refresh: bool = False):
     """Get user's Google Classroom courses"""
     try:
         # Validate user exists
@@ -298,7 +410,7 @@ async def get_user_courses(user_id: str):
         classroom_service = GoogleClassroomService()
         
         # Sync courses
-        courses = await classroom_service.sync_courses(user_id)
+        courses = await classroom_service.sync_courses(user_id, force_refresh=refresh)
         
         return {
             "user_id": user_id,
@@ -311,8 +423,8 @@ async def get_user_courses(user_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/google-classroom/materials/{user_id}/{course_id}")
-async def get_course_materials(user_id: str, course_id: str):
-    """Get materials for a specific Google Classroom course"""
+async def get_course_materials(user_id: str, course_id: str, background_tasks: BackgroundTasks, refresh: bool = False):
+    """Get materials for a specific Google Classroom course and trigger auto-embedding"""
     try:
         # Validate user exists
         user = await user_manager.get_user(user_id)
@@ -323,13 +435,17 @@ async def get_course_materials(user_id: str, course_id: str):
         classroom_service = GoogleClassroomService()
         
         # Sync materials
-        materials = await classroom_service.sync_course_materials(user_id, course_id)
+        materials = await classroom_service.sync_course_materials(user_id, course_id, force_refresh=refresh)
+        
+        # AUTO-PROCESSING REMOVED for performance (selective sync)
+        # background_tasks.add_task(classroom_service.process_classroom_materials, user_id, course_id)
         
         return {
             "user_id": user_id,
             "course_id": course_id,
             "materials": materials,
-            "total_materials": len(materials)
+            "total_materials": len(materials),
+            "status": "ready"
         }
         
     except Exception as e:
@@ -337,7 +453,7 @@ async def get_course_materials(user_id: str, course_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/google-classroom/assignments/{user_id}/{course_id}")
-async def get_course_assignments(user_id: str, course_id: str):
+async def get_course_assignments(user_id: str, course_id: str, refresh: bool = False):
     """Get assignments for a specific Google Classroom course"""
     try:
         # Validate user exists
@@ -349,7 +465,7 @@ async def get_course_assignments(user_id: str, course_id: str):
         classroom_service = GoogleClassroomService()
         
         # Sync assignments
-        assignments = await classroom_service.sync_assignments(user_id, course_id)
+        assignments = await classroom_service.sync_assignments(user_id, course_id, force_refresh=refresh)
         
         return {
             "user_id": user_id,
@@ -388,6 +504,17 @@ async def get_course_announcements(user_id: str, course_id: str):
         logger.error(f"Error getting Google Classroom announcements: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/google-classroom/status/{user_id}/{course_id}")
+async def get_course_processing_status(user_id: str, course_id: str):
+    """Check processing status for a specific course"""
+    try:
+        vector_db = await get_vector_db()
+        status = await vector_db.get_processing_status(user_id, course_id)
+        return {"user_id": user_id, "course_id": course_id, "status": status}
+    except Exception as e:
+        logger.error(f"Error getting processing status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/google-classroom/process/{user_id}/{course_id}")
 async def process_classroom_course(user_id: str, course_id: str):
     """Process all materials from a Google Classroom course"""
@@ -408,9 +535,26 @@ async def process_classroom_course(user_id: str, course_id: str):
             "course_id": course_id,
             "processing_result": result
         }
-        
     except Exception as e:
         logger.error(f"Error processing Google Classroom course: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/google-classroom/process-material")
+async def process_material(
+    user_id: str = Form(...),
+    course_id: str = Form(...),
+    material_id: str = Form(...),
+    material_type: str = Form(...) # 'material' or 'assignment'
+):
+    """Process a specific Classroom material or assignment"""
+    try:
+        classroom_service = GoogleClassroomService()
+        result = await classroom_service.process_single_material(
+            user_id, material_id, material_type, course_id
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error processing material: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/google-classroom/status/{user_id}")
@@ -436,7 +580,7 @@ async def get_classroom_status(user_id: str):
         }
         
     except Exception as e:
-        logger.error(f"Error checking Google Classroom status: {str(e)}")
+        logger.error(f"Error checking Google Classroom status: {repr(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/google-classroom/revoke/{user_id}")

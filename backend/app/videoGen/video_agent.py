@@ -10,7 +10,7 @@ from knowledge_loader import (
     get_scene_planning_prompt,
     get_manim_generation_prompt,
     get_remotion_generation_prompt,
-    get_fix_manim_prompt,
+    get_remotion_fallback_prompt,
 )
 
 
@@ -82,7 +82,8 @@ def parse_scene_plan(plan_text: str) -> list[dict]:
         description = block[header_end:].strip()
         
         # Extract narration text (everything after "Narration:" until the next bullet point or end of block)
-        narration_match = re.search(r'Narration:\s*(.+?)(?=\n\s*-|\Z)', block, re.DOTALL | re.IGNORECASE)
+        # We use \** because Gemini output sometimes adds bold formatting around the word
+        narration_match = re.search(r'Narration\**:\s*(.+?)(?=\n\s*-|\Z)', block, re.DOTALL | re.IGNORECASE)
         narration = narration_match.group(1).strip() if narration_match else ""
         # Remove any surrounding quotes
         if narration.startswith('"') or narration.startswith("'"):
@@ -121,15 +122,16 @@ class VideoAgent:
         self.client = client or GeminiClient()
         self.system_prompt = system_prompt
 
-    def step1_plan_scenes(self, topic: str) -> str:
+    def step1_plan_scenes(self, topic: str, context: str = "") -> str:
         """Step 1: Generate a scene plan with engine tags."""
         print("\n Step 1: Planning scenes (with engine selection)...")
         print(f"   Topic: {topic}")
 
         user_prompt = f"""
 Create a video about the following topic:
-
 **{topic}**
+
+{f"SOURCE MATERIAL CONTEXT:\n{context}\n" if context else ""}
 
 {get_scene_planning_prompt()}
 """
@@ -186,24 +188,20 @@ Create a video about the following topic:
             max_tokens=16000,
         )
 
+        # We always generate our own Root.tsx from the scene metadata to ensure 
+        # all compositions are correctly registered and avoid "mismatch" errors.
+        root_tsx = self._default_root_tsx(remotion_scenes)
+        
+        # We only take MyComp.tsx from the AI
         tsx_blocks = extract_multiple_code_blocks(response, "tsx")
-
         if len(tsx_blocks) >= 2:
-            root_tsx = tsx_blocks[0]
             comp_tsx = tsx_blocks[1]
         elif len(tsx_blocks) == 1:
-            root_tsx = tsx_blocks[0]
-            comp_tsx = extract_code_block(response, "typescript") or tsx_blocks[0]
+            comp_tsx = tsx_blocks[0]
         else:
-            ts_blocks = extract_multiple_code_blocks(response, "typescript")
-            if len(ts_blocks) >= 2:
-                root_tsx = ts_blocks[0]
-                comp_tsx = ts_blocks[1]
-            else:
-                root_tsx = self._default_root_tsx(remotion_scenes)
-                comp_tsx = extract_code_block(response)
+            comp_tsx = extract_code_block(response, "typescript") or extract_code_block(response)
 
-        print("   Remotion code generated!")
+        print("   Remotion code generated (with deterministic Root.tsx)!")
         return root_tsx, comp_tsx
 
     def _default_root_tsx(self, scenes: list[dict]) -> str:
@@ -232,25 +230,35 @@ export const RemotionRoot: React.FC = () => {{
 }};
 """
 
-    def fix_manim_code(self, code: str, error: str, attempt: int = 1) -> str:
-        """Send broken Manim code + error to Gemini for auto-fixing."""
-        print(f"\n   Auto-fix attempt {attempt}/3 — sending to Gemini...")
+    def generate_remotion_fallback(self, scene_plan: str, failed_scene: dict, error: str) -> tuple[str, str] | None:
+        """Generate Remotion code as a fallback for a failed Manim scene."""
+        print(f"\n   Generating Remotion fallback for Scene {failed_scene['index']}: {failed_scene['title']}...")
 
-        user_prompt = get_fix_manim_prompt(code, error, attempt)
+        user_prompt = get_remotion_fallback_prompt(scene_plan, failed_scene, error)
         response = self.client.generate(
             system_prompt=self.system_prompt,
             user_prompt=user_prompt,
-            temperature=0.3,
+            temperature=0.5,
             max_tokens=16000,
         )
 
-        fixed_code = extract_code_block(response, "python")
-        # Safety: strip any leftover markdown fences
-        fixed_code = _strip_code_fences(fixed_code)
-        print(f"   Fixed code received ({len(fixed_code):,} chars)")
-        return fixed_code
+        tsx_blocks = extract_multiple_code_blocks(response, "tsx")
 
-    def generate_video(self, topic: str) -> dict:
+        # Always use deterministic Root.tsx for fallback too
+        root_tsx = self._default_root_tsx([failed_scene])
+        
+        tsx_blocks = extract_multiple_code_blocks(response, "tsx")
+        if len(tsx_blocks) >= 2:
+            comp_tsx = tsx_blocks[1]
+        elif len(tsx_blocks) == 1:
+            comp_tsx = tsx_blocks[0]
+        else:
+            comp_tsx = extract_code_block(response)
+
+        print(f"   Remotion fallback code generated for Scene {failed_scene['index']}")
+        return root_tsx, comp_tsx
+
+    def generate_video(self, topic: str, context: str = "") -> dict:
         """
         Run the full hybrid pipeline.
 
@@ -259,7 +267,7 @@ export const RemotionRoot: React.FC = () => {{
             'root_tsx', 'comp_tsx'
         """
         # Step 1: Plan with engine tags
-        scene_plan = self.step1_plan_scenes(topic)
+        scene_plan = self.step1_plan_scenes(topic, context=context)
 
         # Parse scene tags
         scenes = parse_scene_plan(scene_plan)

@@ -1,6 +1,7 @@
 import os
 import logging
 import tempfile
+import shutil
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import uuid
@@ -19,6 +20,7 @@ from pdf2image import convert_from_path
 
 # Google AI libraries
 import google.generativeai as genai
+from fastapi import UploadFile
 
 logger = logging.getLogger(__name__)
 
@@ -33,17 +35,20 @@ else:
     genai.configure(api_key="AIzaSyAWKOQzKrlYcVy-uFxdmcK5QWlt1LU-gaI")  # fallback
 
 # Google AI Models
-VISION_MODEL = "gemini-1.5-flash"
+VISION_MODEL = "gemini-2.5-flash"
 EMBED_MODEL = "models/embedding-001"
 
 class DocumentProcessor:
     def __init__(self):
-        # Initialize text splitter with optimal configuration for detailed analysis
+        # Initialize text splitter with optimal configuration
+        # Increased chunk_size to reduce total API calls while maintaining semantic quality
         self.text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=300,      # Even smaller chunks for better semantic granularity
-            chunk_overlap=50,    # Reduced overlap for more distinct chunks
-            separators=["\n\n", "\n", ". ", "; ", ", ", " ", ""]  # More granular separators
+            chunk_size=500,      # Increased from 300 to reduce API load
+            chunk_overlap=100,   # Increased overlap for better context
+            separators=["\n\n", "\n", ". ", "; ", ", ", " ", ""]
         )
+        self.max_concurrent_embeddings = 10
+        self.semaphore = asyncio.Semaphore(self.max_concurrent_embeddings)
         
     def extract_digital_pages(self, file_path: str):
         """Extract text from digital PDF pages"""
@@ -249,92 +254,168 @@ class DocumentProcessor:
             return ""
     
     def get_embedding(self, text: str):
-        """Get embedding using Google Gemini"""
+        """Get embedding using Google Gemini (Synchronous wrapper)"""
         try:
             response = genai.embed_content(
                 model="models/gemini-embedding-001",
                 content=text
             )
             embedding = np.array(response["embedding"]).astype("float32")
-            logger.info(f"Generated embedding for text: '{text[:50]}...' - length: {len(embedding)}")
             return embedding
         except Exception as e:
             logger.error(f"Error getting embedding: {str(e)}")
             return None
 
-    async def process_document(self, file, user_id: str, document_id: str, 
-                        filename: str) -> Dict[str, Any]:
-        """Process uploaded document and store embeddings"""
+    async def get_embedding_async(self, text: str):
+        """Get embedding asychronously with rate limiting"""
+        async with self.semaphore:
+            # Run the synchronous SDK call in a thread pool to avoid blocking the event loop
+            try:
+                return await asyncio.to_thread(self.get_embedding, text)
+            except Exception as e:
+                logger.error(f"Async embedding error: {str(e)}")
+                return None
+
+    def generate_summary(self, text: str) -> str:
+        """Generate a brief summary of the document using Google Gemini"""
+        try:
+            logger.info("Generating document summary...")
+            model = genai.GenerativeModel(VISION_MODEL) # gemini-2.5-flash
+            
+            # Truncate text if it's extremely long to avoid token limits
+            # 100k chars is well within Gemini 1.5 Flash limit (1M tokens)
+            max_chars = 100000 
+            truncated_text = text[:max_chars] if len(text) > max_chars else text
+            
+            prompt = f"""
+            Read the following document content and summarize it briefly (5-7 lines max).
+            Focus on the main topics, key concepts, and overall purpose of the document.
+            
+            Document Content:
+            {truncated_text}
+            """
+            
+            response = model.generate_content(prompt)
+            summary = response.text.strip()
+            logger.info("Successfully generated document summary.")
+            return summary
+        except Exception as e:
+            logger.error(f"Error generating summary: {str(e)}")
+            return "Summary generation failed."
+
+    async def process_document(self, file: UploadFile, user_id: str, document_id: str, filename: str, course_id: str = None) -> Dict[str, Any]:
+        """Process a document and store its embeddings"""
         start_time = datetime.utcnow()
         
         try:
-            # Save uploaded file temporarily
+            # Create uploads directory if it doesn't exist
+            config.UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+            
+            # Save a persistent copy of the file for downloads
+            persistent_path = config.UPLOADS_DIR / document_id
+            with open(persistent_path, "wb") as f:
+                content = await file.read()
+                f.write(content)
+                await file.seek(0) # Reset file pointer for further processing
+            
+            # Create a temporary file to store the upload for processing
             with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}") as temp_file:
-                temp_file.write(file.file.read())
                 temp_file_path = temp_file.name
+                # Use shutil to copy the file content
+                file.file.seek(0)
+                shutil.copyfileobj(file.file, temp_file)
             
-            # Determine file type
-            file_extension = Path(filename).suffix.lower().lstrip('.')
+            # Extract text based on file type
+            text = ""
+            file_extension = filename.split('.')[-1].lower() if '.' in filename else ""
             
-            # Extract text
-            text = self.extract_text(temp_file_path, file_extension)
+            if file_extension == 'pdf':
+                text = self.extract_text_from_pdf(temp_file_path)
+            elif file_extension in ['ppt', 'pptx']:
+                text = self.extract_text_from_pptx(temp_file_path)
+            elif file_extension in ['doc', 'docx']:
+                text = self.extract_text_from_docx(temp_file_path)
+            elif file_extension == 'txt':
+                with open(temp_file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    text = f.read()
+            else:
+                logger.warning(f"Unsupported file type: {file_extension}")
+                return {"error": "Unsupported file type"}
             
-            if not text.strip():
-                raise Exception("Could not extract text from document")
+            if not text or not text.strip():
+                logger.warning(f"No text extracted from document: {filename}")
+                return {"error": "No text extracted from document"}
             
             # Split text into chunks
             chunks = self.text_splitter.create_documents([text])
+            logger.info(f"Split document into {len(chunks)} chunks")
             
-            # Convert to our format and generate embeddings
+            # 2. CONCURRENT PROCESSING
+            # Run summary and embeddings in parallel
+            logger.info(f"Generating summary and {len(chunks)} embeddings concurrently...")
+            
+            summary_task = asyncio.to_thread(self.generate_summary, text)
+            embedding_tasks = [self.get_embedding_async(chunk.page_content) for chunk in chunks]
+            
+            # Wait for all embeddings and the summary to finish
+            results = await asyncio.gather(*embedding_tasks, summary_task)
+            
+            embeddings_list = results[:-1]
+            summary = results[-1]
+            
+            # Convert to our format
             chunk_data = []
-            embeddings = []
+            final_embeddings = []
             
-            for i, chunk in enumerate(chunks):
-                chunk_text = chunk.page_content
-                embedding = self.get_embedding(chunk_text)
-                
-                if embedding is not None:
+            for i, (chunk, emb) in enumerate(zip(chunks, embeddings_list)):
+                if emb is not None:
                     chunk_data.append({
-                        "content": chunk_text,
+                        "content": chunk.page_content,
                         "metadata": {
                             "chunk_index": i,
                             "source": filename
                         }
                     })
-                    embeddings.append(embedding.tolist())
+                    final_embeddings.append(emb.tolist())
             
-            # Store in vector database
+            # 3. Store in vector database
             vector_db = await get_vector_db()
             success = await vector_db.store_embeddings(
                 user_id=user_id,
                 document_id=document_id,
                 filename=filename,
                 chunks=chunk_data,
-                embeddings=embeddings
+                embeddings=final_embeddings,
+                summary=summary,
+                course_id=course_id
             )
             
             # Clean up temp file
             os.unlink(temp_file_path)
             
             processing_time = (datetime.utcnow() - start_time).total_seconds()
+            logger.info(f"Successfully processed {filename}: {len(chunk_data)} chunks in {processing_time:.2f}s")
             
             return {
-                "success": success,
+                "document_id": document_id,
+                "filename": filename,
                 "chunks_processed": len(chunk_data),
                 "processing_time": processing_time,
-                "document_id": document_id,
-                "filename": filename
+                "summary": summary,
+                "course_id": course_id
             }
             
         except Exception as e:
             logger.error(f"Error processing document: {str(e)}")
+            import traceback
+            traceback.print_exc()
             # Clean up temp file on error
             if 'temp_file_path' in locals():
                 try:
                     os.unlink(temp_file_path)
                 except:
                     pass
-            raise e
+            return {"error": str(e)}
     
     async def get_user_documents(self, user_id: str) -> List[Dict[str, Any]]:
         """Get all documents for a user"""

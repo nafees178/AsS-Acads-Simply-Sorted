@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { BookOpen, Clock, CheckCircle, Sparkles, ChevronDown, AlertTriangle, Loader2 } from 'lucide-react';
+import { BookOpen, Clock, CheckCircle, Sparkles, ChevronDown, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 import { Card } from '../components/shared/Card';
 import { StatCard } from '../components/shared/StatCard';
 import { PriorityBadge } from '../components/shared/PriorityBadge';
@@ -11,6 +11,8 @@ const urgencyDot: Record<string, string> = {
     critical: 'bg-scarlet',
     approaching: 'bg-amber',
     ontrack: 'bg-emerald',
+    completed: 'bg-emerald',
+    incomplete: 'bg-scarlet',
 };
 
 const colors = ['#06B6D4', '#7C3AED', '#F59E0B', '#10B981', '#FF4D6A', '#3B82F6'];
@@ -43,9 +45,17 @@ const Dashboard: React.FC = () => {
         const fetchDashboardData = async () => {
             if (!userId) return;
             try {
-                setLoading(true);
+                // We don't call setLoading(true) here if we want an 'instant' feel
+                // and we already have some data from a previous fetch.
+                // The api.getCourses/api.getAssignments now use localStorage cache.
+
                 const coursesRes = await api.getCourses(userId);
                 const coursesList = coursesRes.courses || [];
+
+                if (coursesList.length === 0) {
+                    setLoading(false);
+                    return;
+                }
 
                 let allTasks: any[] = [];
                 let allEvents: any[] = [];
@@ -67,6 +77,7 @@ const Dashboard: React.FC = () => {
 
                     assignments.forEach((a: any) => {
                         const dueDateStr = formatGoogleDate(a.due_date);
+                        const state = a.state?.toLowerCase() || 'approaching';
 
                         allTasks.push({
                             id: a.id,
@@ -76,8 +87,8 @@ const Dashboard: React.FC = () => {
                             courseColor: color,
                             dueDate: dueDateStr,
                             countdown: dueDateStr,
-                            urgency: 'approaching',
-                            completed: false,
+                            urgency: state, // Use backend state
+                            completed: state === 'completed',
                             materials: a.materials || []
                         });
 
@@ -88,18 +99,25 @@ const Dashboard: React.FC = () => {
                             courseColor: color,
                             courseName: course.name || 'Untitled Course',
                             date: dueDateStr,
-                            countdown: dueDateStr
+                            countdown: dueDateStr,
+                            status: state
                         });
                     });
                 });
 
-                setTasks(allTasks);
+                // Filter tasks to only show non-completed in the "To-Do" list
+                const pendingTasks = allTasks.filter(t => !t.completed);
+                setTasks(pendingTasks);
                 setTimelineEvents(allEvents.slice(0, 10)); // Limit to 10
+
+                const totalTasks = allTasks.length;
+                const completedCount = allTasks.filter(t => t.completed).length;
+                const completionRate = totalTasks > 0 ? Math.round((completedCount / totalTasks) * 100) : 0;
 
                 setStats({
                     coursesSynced: coursesList.length,
-                    upcomingDeadlines: allTasks.length,
-                    tasksCompleted: 0,
+                    upcomingDeadlines: pendingTasks.length,
+                    tasksCompleted: completionRate,
                     aiContentReady: 0,
                 });
 
@@ -119,10 +137,19 @@ const Dashboard: React.FC = () => {
         <div className="space-y-6">
             {/* Welcome Banner */}
             <Card hover={false} className="relative overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-r from-indigo/10 to-teal/10 pointer-events-none" />
+                <div className="absolute inset-0 bg-linear-to-r from-indigo/10 to-teal/10 pointer-events-none" />
                 <div className="relative flex items-center justify-between">
                     <div>
-                        <h2 className="font-[Outfit] text-2xl font-semibold text-pure">Good evening, {displayUserId}</h2>
+                        <div className="flex items-center gap-4">
+                            <h2 className="font-[Outfit] text-2xl font-semibold text-pure">Good evening, {displayUserId}</h2>
+                            <button
+                                onClick={() => window.location.reload()}
+                                className="p-1 px-2 rounded-lg bg-teal/10 text-teal hover:bg-teal/20 transition-all text-[10px] font-bold flex items-center gap-1"
+                                title="Clear frontend cache"
+                            >
+                                <RefreshCw size={10} /> Clear Cache
+                            </button>
+                        </div>
                         <p className="text-silver mt-1">{stats.upcomingDeadlines} deadlines approaching this week</p>
                     </div>
                     <div className="hidden sm:block w-48">
@@ -152,19 +179,19 @@ const Dashboard: React.FC = () => {
                     <h3 className="font-[Outfit] text-lg font-semibold text-pure">Priority To-Do</h3>
 
                     {loading ? (
-                        <Card className="!p-12 border-dashed border-edge/50">
+                        <Card className="p-12! border-dashed border-edge/50">
                             <div className="flex flex-col items-center justify-center text-center">
                                 <Loader2 className="w-8 h-8 text-teal animate-spin mb-3" />
                                 <p className="text-slate text-sm">Syncing assignments from all your courses...</p>
                             </div>
                         </Card>
                     ) : tasks.length === 0 ? (
-                        <Card className="!p-8 text-center text-slate">
+                        <Card className="p-8! text-center text-slate">
                             No assignments found.
                         </Card>
                     ) : (
                         tasks.map((task) => (
-                            <Card key={task.id} className="!p-4">
+                            <Card key={task.id} className="p-4!">
                                 <div className="flex items-start gap-3">
                                     <div className={`w-2.5 h-2.5 rounded-full mt-1.5 shrink-0 ${urgencyDot[task.urgency]}`} />
                                     <div className="flex-1 min-w-0">
@@ -203,7 +230,7 @@ const Dashboard: React.FC = () => {
                             <div key={event.id} className="relative pl-8 pb-4">
                                 <div className="absolute left-1.5 top-2 w-3 h-3 rounded-full border-2"
                                     style={{ borderColor: event.courseColor, backgroundColor: `${event.courseColor}30` }} />
-                                <Card className="!p-3">
+                                <Card className="p-3!">
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <p className="text-sm font-medium text-pure truncate w-[200px]">{event.title}</p>

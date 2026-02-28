@@ -254,22 +254,27 @@ class GoogleClassroomService:
             return None
             
         try:
-            service = build('classroom', 'v1', credentials=creds)
+            # Silence the discovery cache warning by setting static_discovery=False
+            service = build('classroom', 'v1', credentials=creds, static_discovery=False)
             return service
         except Exception as e:
             logger.error(f"Error building Classroom service for user {user_id}: {e}")
             return None
     
-    async def sync_courses(self, user_id: str) -> List[Dict]:
+    async def sync_courses(self, user_id: str, force_refresh: bool = False) -> List[Dict]:
         """
-        Sync user's Google Classroom courses.
+        Sync user's Google Classroom courses with local caching.
+        """
+        db = await get_vector_db()
         
-        Args:
-            user_id: User identifier
-            
-        Returns:
-            List of course information
-        """
+        # 1. Try to get from cache first (if not forcing refresh)
+        if not force_refresh:
+            cached_data = await db.get_cached_classroom_data(user_id, "all", "courses")
+            if cached_data:
+                logger.info(f"Returning {len(cached_data)} cached courses for user {user_id}")
+                return cached_data
+
+        # 2. If not in cache, fetch from service
         service = self.get_classroom_service(user_id)
         if not service:
             return []
@@ -295,24 +300,28 @@ class GoogleClassroomService:
                 }
                 course_list.append(course_info)
             
-            logger.info(f"Synced {len(course_list)} courses for user {user_id}")
+            # 3. Update cache
+            await db.cache_classroom_data(user_id, "all", "courses", course_list)
+            
+            logger.info(f"Synced and cached {len(course_list)} courses for user {user_id}")
             return course_list
             
         except HttpError as e:
             logger.error(f"Error syncing courses for user {user_id}: {e}")
             return []
     
-    async def sync_course_materials(self, user_id: str, course_id: str) -> List[Dict]:
+    async def sync_course_materials(self, user_id: str, course_id: str, force_refresh: bool = False) -> List[Dict]:
         """
-        Sync materials for a specific course.
+        Sync materials for a specific course with local caching.
+        """
+        db = await get_vector_db()
         
-        Args:
-            user_id: User identifier
-            course_id: Google Classroom course ID
-            
-        Returns:
-            List of course materials
-        """
+        # 1. Try Cache
+        if not force_refresh:
+            cached_data = await db.get_cached_classroom_data(user_id, course_id, "materials")
+            if cached_data:
+                return cached_data
+
         service = self.get_classroom_service(user_id)
         if not service:
             return []
@@ -337,11 +346,15 @@ class GoogleClassroomService:
                     'creation_time': material.get('creationTime'),
                     'update_time': material.get('updateTime'),
                     'materials': material.get('materials', []),
-                    'alternate_link': material.get('alternateLink')
+                    'alternate_link': material.get('alternateLink'),
+                    'view_url': self._extract_view_url(material.get('materials', []))
                 }
                 material_list.append(material_info)
             
-            logger.info(f"Synced {len(material_list)} materials for course {course_id}")
+            # 2. Update Cache
+            await db.cache_classroom_data(user_id, course_id, "materials", material_list)
+            
+            logger.info(f"Synced and cached {len(material_list)} materials for course {course_id}")
             return material_list
             
         except HttpError as e:
@@ -382,7 +395,8 @@ class GoogleClassroomService:
                     'creation_time': announcement.get('creationTime'),
                     'update_time': announcement.get('updateTime'),
                     'materials': announcement.get('materials', []),
-                    'alternate_link': announcement.get('alternateLink')
+                    'alternate_link': announcement.get('alternateLink'),
+                    'view_url': self._extract_view_url(announcement.get('materials', []))
                 }
                 announcement_list.append(announcement_info)
             
@@ -393,17 +407,18 @@ class GoogleClassroomService:
             logger.error(f"Error syncing announcements for course {course_id}: {e}")
             return []
     
-    async def sync_assignments(self, user_id: str, course_id: str) -> List[Dict]:
+    async def sync_assignments(self, user_id: str, course_id: str, force_refresh: bool = False) -> List[Dict]:
         """
-        Sync assignments for a specific course.
+        Sync assignments for a specific course with local caching and status logic.
+        """
+        db = await get_vector_db()
         
-        Args:
-            user_id: User identifier
-            course_id: Google Classroom course ID
-            
-        Returns:
-            List of assignments
-        """
+        # 1. Try Cache first
+        if not force_refresh:
+            cached_data = await db.get_cached_classroom_data(user_id, course_id, "assignments")
+            if cached_data:
+                return cached_data
+
         service = self.get_classroom_service(user_id)
         if not service:
             return []
@@ -416,27 +431,73 @@ class GoogleClassroomService:
             ).execute()
             
             course_work = results.get('courseWork', [])
+            
+            # Fetch student submissions to check completion status
+            submissions_results = service.courses().courseWork().studentSubmissions().list(
+                courseId=course_id,
+                courseWorkId='-', # All coursework
+                userId='me'
+            ).execute()
+            submissions = {s['courseWorkId']: s for s in submissions_results.get('studentSubmissions', [])}
+            
             assignment_list = []
+            now = datetime.utcnow()
             
             for work in course_work:
+                # 1. Determine Due Date
+                due_dt = None
+                due_date = work.get('dueDate')
+                if due_date:
+                    due_time = work.get('dueTime', {'hours': 23, 'minutes': 59})
+                    due_dt = datetime(
+                        due_date.get('year'), 
+                        due_date.get('month'), 
+                        due_date.get('day'),
+                        due_time.get('hours', 0),
+                        due_time.get('minutes', 0)
+                    )
+                
+                # 2. Determine Status 
+                # Values: "Completed", "Incomplete", "Approaching"
+                submission = submissions.get(work['id'], {})
+                sub_state = submission.get('state') # TURNED_IN, RETURNED, GRADED, NEW, RECLAIMED_BY_STUDENT
+                
+                is_done = sub_state in ('TURNED_IN', 'RETURNED', 'GRADED')
+                
+                if is_done:
+                    status = "Completed"
+                elif due_dt and due_dt < now:
+                    status = "Incomplete"
+                else:
+                    status = "Approaching"
+
                 assignment_info = {
                     'id': work.get('id'),
                     'course_id': course_id,
                     'title': work.get('title'),
                     'description': work.get('description'),
-                    'state': work.get('state'),
+                    'state': status, # Using our calculated status
+                    'original_state': work.get('state'),
                     'due_date': work.get('dueDate'),
                     'due_time': work.get('dueTime'),
+                    'due_datetime': due_dt.isoformat() if due_dt else None,
                     'creation_time': work.get('creationTime'),
                     'update_time': work.get('updateTime'),
                     'materials': work.get('materials', []),
                     'work_type': work.get('workType'),
                     'max_points': work.get('maxPoints'),
-                    'alternate_link': work.get('alternateLink')
+                    'alternate_link': work.get('alternateLink'),
+                    'view_url': self._extract_view_url(work.get('materials', []))
                 }
                 assignment_list.append(assignment_info)
             
-            logger.info(f"Synced {len(assignment_list)} assignments for course {course_id}")
+            # 3. Prioritize by due date (earliest first)
+            assignment_list.sort(key=lambda x: x['due_datetime'] or '9999-12-31')
+
+            # 4. Update Cache
+            await db.cache_classroom_data(user_id, course_id, "assignments", assignment_list)
+            
+            logger.info(f"Synced and cached {len(assignment_list)} assignments for course {course_id}")
             return assignment_list
             
         except HttpError as e:
@@ -454,6 +515,9 @@ class GoogleClassroomService:
         Returns:
             Processing results summary
         """
+        db = await get_vector_db()
+        await db.set_processing_status(user_id, course_id, "processing")
+        
         total_processed = 0
         errors = []
         
@@ -503,14 +567,94 @@ class GoogleClassroomService:
             except Exception as e:
                 errors.append(f"Error processing assignment {assignment.get('title')}: {str(e)}")
         
-        return {
+        # Sync announcements
+        announcements = await self.sync_announcements(user_id, course_id)
+        for announcement in announcements:
+            try:
+                for material_item in announcement.get('materials', []):
+                    drive_file = material_item.get('driveFile', {})
+                    if drive_file:
+                        file_info = drive_file.get('driveFile', {})
+                        file_id = file_info.get('id')
+                        title = file_info.get('title')
+                        
+                        if file_id:
+                            # Use the announcement text as context, truncated if it's too long
+                            context = announcement.get('text', 'Announcement')[:100]
+                            processed = await self._process_drive_file(
+                                user_id, file_id, title, context, course_id
+                            )
+                            if processed:
+                                total_processed += 1
+                            else:
+                                errors.append(f"Failed to process announcement material: {title}")
+            except Exception as e:
+                # Provide a fallback string if 'text' is None
+                err_context = str(announcement.get('text', 'Announcement'))[:50]
+                errors.append(f"Error processing announcement {err_context}: {str(e)}")
+        
+        result = {
             'total_processed': total_processed,
             'errors': errors,
             'materials_synced': len(materials),
-            'assignments_synced': len(assignments)
+            'assignments_synced': len(assignments),
+            'announcements_synced': len(announcements)
         }
+        
+        await db.set_processing_status(user_id, course_id, "completed")
+        return result
+
+    async def process_single_material(self, user_id: str, material_id: str, material_type: str, course_id: str) -> Dict:
+        """
+        Process a specific Classroom material or assignment.
+        material_type: 'material' or 'assignment'
+        """
+        service = self.get_classroom_service(user_id)
+        if not service:
+            return {"success": False, "error": "Authentication failed"}
+            
+        try:
+            item = None
+            if material_type == 'material':
+                item = service.courses().courseWorkMaterials().get(
+                    courseId=course_id, id=material_id
+                ).execute()
+            else:
+                item = service.courses().courseWork().get(
+                    courseId=course_id, id=material_id
+                ).execute()
+                
+            if not item:
+                return {"success": False, "error": "Item not found"}
+                
+            total_processed = 0
+            materials_list = item.get('materials', [])
+            
+            for material_item in materials_list:
+                drive_file = material_item.get('driveFile', {})
+                if drive_file:
+                    file_info = drive_file.get('driveFile', {})
+                    file_id = file_info.get('id')
+                    title = file_info.get('title')
+                    
+                    if file_id:
+                        success = await self._process_drive_file(
+                            user_id, file_id, title, item.get('title', 'Classroom Item'), course_id
+                        )
+                        if success:
+                            total_processed += 1
+                            
+            return {
+                "success": True, 
+                "total_processed": total_processed,
+                "item_title": item.get('title')
+            }
+            
+        except Exception as e:
+            logger.error(f"Error processing single material: {str(e)}")
+            return {"success": False, "error": str(e)}
     
-    async def _process_drive_file(self, user_id: str, file_id: str, title: str, context: str) -> bool:
+    async def _process_drive_file(self, user_id: str, file_id: str, title: str, context: str, course_id: str = None) -> bool:
         """
         Process a Google Drive file.
         
@@ -519,6 +663,7 @@ class GoogleClassroomService:
             file_id: Google Drive file ID
             title: File title
             context: Context (material or assignment title)
+            course_id: Course identifier
             
         Returns:
             True if processed successfully, False otherwise
@@ -563,20 +708,45 @@ class GoogleClassroomService:
             )
             
             # Process the document
-            document_id = f"gc_{file_id}_{int(datetime.now().timestamp())}"
-            result = await self.document_processor.process_document(
-                file=mock_upload_file,
-                user_id=user_id,
-                document_id=document_id,
-                filename=title
+            doc_proc = DocumentProcessor()
+            success = await doc_proc.process_document(
+                mock_upload_file, user_id, f"drive_{file_id}", title, course_id
             )
-            
-            logger.info(f"Processed Google Classroom file: {title}")
-            return True
+            return success
             
         except Exception as e:
-            logger.error(f"Error processing Google Drive file {file_id}: {e}")
+            logger.error(f"Error processing drive file {file_id}: {e}")
             return False
+
+    def _extract_view_url(self, materials: List[Dict]) -> Optional[str]:
+        """
+        Extract the most relevant viewing URL from a list of Google Classroom materials.
+        
+        Priority:
+        1. Drive File alternateLink
+        2. External Link URL
+        3. YouTube Video alternateLink
+        """
+        if not materials:
+            return None
+            
+        for material in materials:
+            # Check for Drive File
+            drive_file = material.get('driveFile')
+            if drive_file and drive_file.get('driveFile', {}).get('alternateLink'):
+                return drive_file.get('driveFile').get('alternateLink')
+                
+            # Check for Link
+            link = material.get('link')
+            if link and link.get('url'):
+                return link.get('url')
+                
+            # Check for YouTube Video
+            yt = material.get('youtubeVideo')
+            if yt and yt.get('alternateLink'):
+                return yt.get('alternateLink')
+                
+        return None
     
     def revoke_credentials(self, user_id: str) -> bool:
         """
