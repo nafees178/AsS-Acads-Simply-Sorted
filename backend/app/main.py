@@ -13,6 +13,7 @@ from database import get_vector_db, init_vector_db
 from document_processor import DocumentProcessor
 from user_manager import UserManager
 from search_engine import SearchEngine
+from google_classroom_service import GoogleClassroomService
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -188,6 +189,272 @@ async def delete_document(document_id: str, user_id: str):
         
     except Exception as e:
         logger.error(f"Error deleting document: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Google Classroom API Endpoints
+
+@app.get("/auth/google-classroom/{user_id}")
+async def get_google_classroom_auth_url(user_id: str):
+    """Get Google Classroom OAuth2 authorization URL"""
+    try:
+        # Validate user exists
+        user = await user_manager.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Initialize Google Classroom service
+        classroom_service = GoogleClassroomService()
+        
+        # Get authorization URL
+        auth_url = classroom_service.get_authorization_url(user_id)
+        
+        return {
+            "auth_url": auth_url,
+            "message": "Please visit this URL to authorize Google Classroom access"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting Google Classroom auth URL: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/auth/callback")
+async def google_classroom_callback(code: str = None, state: str = None):
+    """Handle Google Classroom OAuth2 callback"""
+    try:
+        # Extract user_id from state parameter
+        if not state:
+            raise HTTPException(status_code=400, detail="Missing state parameter")
+        
+        user_id = state
+        
+        # Validate user exists
+        user = await user_manager.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Reconstruct authorization response URL - use the full URL from Google
+        from urllib.parse import urlencode, quote
+        base_url = "http://localhost:8000/auth/callback"
+        
+        # Build the query parameters, including all parameters from Google
+        params = {}
+        if code:
+            params['code'] = code
+        if state:
+            params['state'] = state
+        
+        # Add other parameters that Google might send
+        import sys
+        from urllib.parse import urlparse, parse_qs
+        
+        # If we have the full URL, parse it properly
+        full_url = f"{base_url}?{urlencode(params)}"
+        
+        logger.info(f"Reconstructed authorization URL: {full_url}")
+        
+        # Initialize Google Classroom service
+        classroom_service = GoogleClassroomService()
+        
+        # Handle OAuth callback
+        success = classroom_service.handle_oauth_callback(user_id, full_url)
+        
+        if success:
+            return {
+                "message": "Google Classroom authorization successful",
+                "user_id": user_id
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Google Classroom authorization failed")
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.error(f"Error handling Google Classroom callback: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Callback error: {str(e)}")
+
+@app.get("/google-classroom/courses/{user_id}")
+async def get_user_courses(user_id: str):
+    """Get user's Google Classroom courses"""
+    try:
+        # Validate user exists
+        user = await user_manager.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Initialize Google Classroom service
+        classroom_service = GoogleClassroomService()
+        
+        # Sync courses
+        courses = await classroom_service.sync_courses(user_id)
+        
+        return {
+            "user_id": user_id,
+            "courses": courses,
+            "total_courses": len(courses)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting Google Classroom courses: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/google-classroom/materials/{user_id}/{course_id}")
+async def get_course_materials(user_id: str, course_id: str):
+    """Get materials for a specific Google Classroom course"""
+    try:
+        # Validate user exists
+        user = await user_manager.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Initialize Google Classroom service
+        classroom_service = GoogleClassroomService()
+        
+        # Sync materials
+        materials = await classroom_service.sync_course_materials(user_id, course_id)
+        
+        return {
+            "user_id": user_id,
+            "course_id": course_id,
+            "materials": materials,
+            "total_materials": len(materials)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting Google Classroom materials: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/google-classroom/assignments/{user_id}/{course_id}")
+async def get_course_assignments(user_id: str, course_id: str):
+    """Get assignments for a specific Google Classroom course"""
+    try:
+        # Validate user exists
+        user = await user_manager.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Initialize Google Classroom service
+        classroom_service = GoogleClassroomService()
+        
+        # Sync assignments
+        assignments = await classroom_service.sync_assignments(user_id, course_id)
+        
+        return {
+            "user_id": user_id,
+            "course_id": course_id,
+            "assignments": assignments,
+            "total_assignments": len(assignments)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting Google Classroom assignments: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/google-classroom/announcements/{user_id}/{course_id}")
+async def get_course_announcements(user_id: str, course_id: str):
+    """Get announcements for a specific Google Classroom course"""
+    try:
+        # Validate user exists
+        user = await user_manager.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Initialize Google Classroom service
+        classroom_service = GoogleClassroomService()
+        
+        # Sync announcements
+        announcements = await classroom_service.sync_announcements(user_id, course_id)
+        
+        return {
+            "user_id": user_id,
+            "course_id": course_id,
+            "announcements": announcements,
+            "total_announcements": len(announcements)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting Google Classroom announcements: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/google-classroom/process/{user_id}/{course_id}")
+async def process_classroom_course(user_id: str, course_id: str):
+    """Process all materials from a Google Classroom course"""
+    try:
+        # Validate user exists
+        user = await user_manager.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Initialize Google Classroom service
+        classroom_service = GoogleClassroomService()
+        
+        # Process course materials
+        result = await classroom_service.process_classroom_materials(user_id, course_id)
+        
+        return {
+            "user_id": user_id,
+            "course_id": course_id,
+            "processing_result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error processing Google Classroom course: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/google-classroom/status/{user_id}")
+async def get_classroom_status(user_id: str):
+    """Check if user has Google Classroom authorization"""
+    try:
+        # Validate user exists
+        user = await user_manager.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Initialize Google Classroom service
+        classroom_service = GoogleClassroomService()
+        
+        # Check if credentials exist
+        creds = classroom_service.get_credentials(user_id)
+        is_authorized = creds is not None and creds.valid
+        
+        return {
+            "user_id": user_id,
+            "is_authorized": is_authorized,
+            "message": "User has Google Classroom access" if is_authorized else "User needs to authorize Google Classroom"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error checking Google Classroom status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/google-classroom/revoke/{user_id}")
+async def revoke_classroom_access(user_id: str):
+    """Revoke Google Classroom access for user"""
+    try:
+        # Validate user exists
+        user = await user_manager.get_user(user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Initialize Google Classroom service
+        classroom_service = GoogleClassroomService()
+        
+        # Revoke credentials
+        success = classroom_service.revoke_credentials(user_id)
+        
+        if success:
+            return {
+                "message": "Google Classroom access revoked successfully",
+                "user_id": user_id
+            }
+        else:
+            return {
+                "message": "No Google Classroom credentials found to revoke",
+                "user_id": user_id
+            }
+        
+    except Exception as e:
+        logger.error(f"Error revoking Google Classroom access: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/")

@@ -6,7 +6,7 @@ import google.generativeai as genai
 logger = logging.getLogger(__name__)
 
 # Configure Google AI
-genai.configure(api_key="AIzaSyBpCGkmGiIOuqMTc3WAaMFrQ62up8J4i94")
+genai.configure(api_key="AIzaSyAWKOQzKrlYcVy-uFxdmcK5QWlt1LU-gaI")
 
 # Google AI Models
 EMBED_MODEL = "models/embedding-001"
@@ -80,13 +80,6 @@ class SearchEngine:
                     except:
                         slide_num = "Unknown"
                 
-                # Create searched_index with page/slide number and document name
-                searched_index = f"Document: {filename}"
-                if page_num:
-                    searched_index += f", Page: {page_num}"
-                elif slide_num:
-                    searched_index += f", Slide: {slide_num}"
-                
                 # Summarize the content (take first 200 characters)
                 summarized_content = content[:200] + "..." if len(content) > 200 else content
                 
@@ -94,7 +87,8 @@ class SearchEngine:
                     "document_id": result["document_id"],
                     "filename": filename,
                     "content": summarized_content,  # Actual content (summarized)
-                    "searched_index": searched_index,  # Document name and page/slide number
+                    "searched_index": filename,  # Only document name
+                    "page": page_num or slide_num or "Unknown",  # Page or slide number
                     "score": result["score"],
                     "metadata": result["metadata"]
                 }

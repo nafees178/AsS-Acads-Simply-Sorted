@@ -23,7 +23,7 @@ import google.generativeai as genai
 logger = logging.getLogger(__name__)
 
 # Configure Google AI
-genai.configure(api_key="AIzaSyBpCGkmGiIOuqMTc3WAaMFrQ62up8J4i94")
+genai.configure(api_key="AIzaSyAWKOQzKrlYcVy-uFxdmcK5QWlt1LU-gaI")
 
 # Google AI Models
 VISION_MODEL = "gemini-1.5-flash"
