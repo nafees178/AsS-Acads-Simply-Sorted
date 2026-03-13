@@ -54,6 +54,7 @@ def main():
         save_scene_plan,
         save_manim_code,
         save_remotion_files,
+        append_remotion_files,
         render_manim_scenes,
         render_remotion_scenes,
         merge_clips,
@@ -161,6 +162,9 @@ def main():
 
     rendered_clips = {}
 
+    # Track all scenes that will use Remotion (original + fallback)
+    all_remotion_scenes = list(result["remotion_scenes"])
+
     # Render Manim scenes (single attempt, no Gemini fix retries)
     if result["manim_scenes"]:
         manim_clips, failed_manim = render_manim_scenes(
@@ -172,6 +176,12 @@ def main():
         # Fallback: generate & render Remotion for any failed Manim scenes
         if failed_manim:
             print(f"\n   {len(failed_manim)} Manim scene(s) failed — falling back to Remotion")
+
+            # Add all failed scenes to the combined remotion scenes list
+            for failed_scene, error_text in failed_manim:
+                all_remotion_scenes.append(failed_scene)
+
+            # Generate fallback code for each failed scene, appending to combined files
             for failed_scene, error_text in failed_manim:
                 try:
                     fallback = agent.generate_remotion_fallback(
@@ -179,16 +189,20 @@ def main():
                     )
                     if fallback:
                         root_tsx, comp_tsx = fallback
-                        save_remotion_files(output_dir, root_tsx, comp_tsx)
-                        fallback_clip = render_remotion_scenes(
-                            output_dir, [failed_scene]
+                        append_remotion_files(
+                            output_dir, root_tsx, comp_tsx,
+                            all_remotion_scenes,
                         )
-                        rendered_clips.update(fallback_clip)
-                        # Update scene metadata
                         failed_scene["engine"] = "REMOTION"
-                        print(f"   Scene {failed_scene['index']}: Remotion fallback successful")
+                        print(f"   Scene {failed_scene['index']}: Remotion fallback code generated")
                 except Exception as e:
                     print(f"   Scene {failed_scene['index']}: Remotion fallback also failed: {e}")
+
+            # Render ALL fallback scenes in one batch (Root.tsx now has all compositions)
+            fallback_scenes_to_render = [s for s, _ in failed_manim if s["engine"] == "REMOTION"]
+            if fallback_scenes_to_render:
+                fallback_clips = render_remotion_scenes(output_dir, fallback_scenes_to_render)
+                rendered_clips.update(fallback_clips)
 
     # Render originally-planned Remotion scenes
     if result["remotion_scenes"]:
