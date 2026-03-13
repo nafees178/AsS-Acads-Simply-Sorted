@@ -13,7 +13,7 @@ gemini_key = os.getenv("GEMINI_API_KEY")
 if gemini_key:
     genai.configure(api_key=gemini_key)
 else:
-    genai.configure(api_key="AIzaSyBsHKqOeHpUJvZ3QBlIQnOd1HVyckmL0LU")  # fallback
+    genai.configure(api_key="AIzaSyAWKOQzKrlYcVy-uFxdmcK5QWlt1LU-gaI")  # fallback
 
 # Google AI Models
 EMBED_MODEL = "models/embedding-001"

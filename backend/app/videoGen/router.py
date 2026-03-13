@@ -127,10 +127,10 @@ def _run_generation(job_id: str, topic: str, user_id: str = None, document_ids: 
             save_scene_plan,
             save_manim_code,
             save_remotion_files,
-            append_remotion_files,
             render_manim_scenes,
             render_remotion_scenes,
             merge_clips,
+            _detect_composition_ids,
         )
         from tts_generator import generate_scene_narrations
 
@@ -242,9 +242,6 @@ def _run_generation(job_id: str, topic: str, user_id: str = None, document_ids: 
         save_state(job)
         rendered_clips = {}
 
-        # Track all scenes that will use Remotion (original + fallback)
-        all_remotion_scenes = list(result["remotion_scenes"])
-
         if result["manim_scenes"]:
             job["progress"] = f"Rendering {len(result['manim_scenes'])} Manim scenes..."
             save_state(job)
@@ -257,12 +254,6 @@ def _run_generation(job_id: str, topic: str, user_id: str = None, document_ids: 
             if failed_manim:
                 job["progress"] = f"{len(failed_manim)} Manim scene(s) failed — falling back to Remotion..."
                 save_state(job)
-
-                # Add all failed scenes to the combined remotion scenes list
-                for failed_scene, error_text in failed_manim:
-                    all_remotion_scenes.append(failed_scene)
-
-                # Generate fallback code for each failed scene, appending to combined files
                 for failed_scene, error_text in failed_manim:
                     try:
                         fallback = agent.generate_remotion_fallback(
@@ -270,20 +261,25 @@ def _run_generation(job_id: str, topic: str, user_id: str = None, document_ids: 
                         )
                         if fallback:
                             root_tsx, comp_tsx = fallback
-                            # Use append to merge with existing Remotion code
-                            append_remotion_files(
-                                output_dir, root_tsx, comp_tsx,
-                                all_remotion_scenes,
+                            save_remotion_files(output_dir, root_tsx, comp_tsx)
+
+                            # Detect actual composition IDs from the newly written Root.tsx
+                            remotion_src = output_dir / "remotion"
+                            root_file = remotion_src / "Root.tsx"
+                            if root_file.exists():
+                                actual_ids = _detect_composition_ids(root_file)
+                                if actual_ids:
+                                    # Use the first available composition ID for this fallback
+                                    failed_scene["comp_id"] = actual_ids[0]
+                                    print(f"      Using detected composition ID: {actual_ids[0]}")
+
+                            fallback_clip = render_remotion_scenes(
+                                output_dir, [failed_scene]
                             )
+                            rendered_clips.update(fallback_clip)
                             failed_scene["engine"] = "REMOTION"
                     except Exception as e:
                         print(f"Scene {failed_scene['index']} Remotion fallback failed: {e}")
-
-                # Render ALL fallback scenes in one batch (Root.tsx now has all compositions)
-                fallback_scenes_to_render = [s for s, _ in failed_manim if s["engine"] == "REMOTION"]
-                if fallback_scenes_to_render:
-                    fallback_clips = render_remotion_scenes(output_dir, fallback_scenes_to_render)
-                    rendered_clips.update(fallback_clips)
 
         if result["remotion_scenes"]:
             job["progress"] = f"Rendering {len(result['remotion_scenes'])} Remotion scenes..."

@@ -154,17 +154,14 @@ Then generate production-ready code for both engines.
 - Must run with: `manim -qh scene.py Scene01_Title`
 
 ## MANIM FORBIDDEN PATTERNS (THESE WILL CRASH — DO NOT USE)
-- NEVER use `self.camera.animate` — Camera has NO `.animate` property in ManimCE. This includes `self.camera.animate.set_opacity()`, `self.camera.animate.move_to()`, `self.camera.animate.scale()`, etc. ALL of these WILL crash.
 - NEVER use `self.camera.frame` — this is ManimGL only, not ManimCE
+- NEVER use `self.camera.animate.set_opacity()` — Camera has no animate
 - NEVER use `ShowCreation()` — use `Create()` instead (ManimCE name)
 - NEVER use `GrowArrow()` on arrows with custom colors — it crashes in some ManimCE versions. ALWAYS use `Create(arrow)` instead.
 - NEVER use `InteractiveScene` — ManimCE uses `Scene` only
 - NEVER use `self.embed()` — ManimGL only
 - NEVER use `self.frame` — ManimGL only
-
-## MANIM ALTERNATIVES FOR COMMON PATTERNS
-- To dim/fade background elements: use `self.play(*[m.animate.set_opacity(0.2) for m in self.mobjects])` on individual mobjects, or add a semi-transparent overlay: `overlay = Rectangle(width=20, height=12, fill_color=BLACK, fill_opacity=0.7, stroke_width=0); self.play(FadeIn(overlay))`
-- For camera zoom: scale the mobjects instead (e.g., `group.animate.scale(1.5)`)
+- For camera zoom: use `self.play(self.camera.auto_zoom(mobjects))` or scale the mobjects
 - For camera movement: move mobjects instead (e.g., `group.animate.shift(LEFT*2)`)
 - For fade to black: use `self.play(*[FadeOut(m) for m in self.mobjects])`
 
@@ -186,21 +183,6 @@ Then generate production-ready code for both engines.
 - Each scene = separate Composition with unique id
 - Composition ids: `Scene02`, `Scene04`, etc.
 - Use deterministic `random()` from remotion, not Math.random
-
-## REMOTION FORBIDDEN PATTERNS (THESE WILL CRASH)
-- NEVER pass strings, colors, or CSS values to `interpolate()` outputRange — it ONLY accepts numbers
-  - BAD: `interpolate(frame, [0, 30], ['#000000', '#FFFFFF'])` ← CRASHES with "outputRange must contain only numbers"
-  - BAD: `interpolate(frame, [0, 30], ['0%', '100%'])` ← CRASHES
-  - GOOD: `interpolate(frame, [0, 30], [0, 1])` then use the number: `opacity: interpolate(frame, [0, 30], [0, 1])`
-- For color transitions: interpolate a numeric value 0→1, then use it to compute RGB channels separately:
-  ```
-  const t = interpolate(frame, [0, 30], [0, 1]);
-  const r = Math.round(28 + t * (88 - 28));
-  const g = Math.round(28 + t * (196 - 28));
-  const b = Math.round(28 + t * (221 - 28));
-  const color = `rgb(${{r}},${{g}},${{b}})`;
-  ```
-- For percentage-based CSS properties: interpolate to a number, then template it: `${{interpolate(frame, [0, 30], [0, 100])}}%`
 
 ## DESIGN PRINCIPLES
 - Dark backgrounds (#1C1C1C) for premium look
