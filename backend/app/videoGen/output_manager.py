@@ -61,8 +61,8 @@ def save_manim_code(output_dir: Path, content: str) -> Path:
     return path
 
 
-def save_remotion_files(output_dir: Path, root_tsx: str, comp_tsx: str) -> list[Path]:
-    """Save the Remotion TypeScript files."""
+def save_remotion_files(output_dir: Path, root_tsx: str, comp_tsx: str | None) -> list[Path]:
+    """Save the Remotion TypeScript files. If comp_tsx is None, only update Root.tsx."""
     remotion_dir = output_dir / "remotion"
     remotion_dir.mkdir(parents=True, exist_ok=True)
 
@@ -71,9 +71,10 @@ def save_remotion_files(output_dir: Path, root_tsx: str, comp_tsx: str) -> list[
     root_path.write_text(root_tsx, encoding="utf-8")
     paths.append(root_path)
 
-    comp_path = remotion_dir / "MyComp.tsx"
-    comp_path.write_text(comp_tsx, encoding="utf-8")
-    paths.append(comp_path)
+    if comp_tsx is not None:
+        comp_path = remotion_dir / "MyComp.tsx"
+        comp_path.write_text(comp_tsx, encoding="utf-8")
+        paths.append(comp_path)
 
     return paths
 
@@ -138,8 +139,14 @@ def render_manim_scenes(
                 env=env,
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=600,
             )
+            # Print stderr summary for visibility
+            if result.stderr:
+                stderr_lines = [l.strip() for l in result.stderr.strip().split("\n") if l.strip()]
+                # Show key lines (errors, warnings, traceback)
+                for line in stderr_lines[-5:]:
+                    print(f"      [{scene_idx}] {line}")
             return scene, result, clip_path, None
         except subprocess.TimeoutExpired:
             return scene, None, clip_path, "timeout"
@@ -156,8 +163,8 @@ def render_manim_scenes(
             class_name = scene["class_name"]
 
             if err == "timeout":
-                print(f"   Scene {scene_idx} timed out — will fall back to Remotion")
-                failed.append((scene, "Manim render timed out (>300s)"))
+                print(f"   Scene {scene_idx} timed out (>600s) — will fall back to Remotion")
+                failed.append((scene, "Manim render timed out (>600s)"))
                 continue
             elif err == "not_found":
                 print(f"   Scene {scene_idx} failed: Manim not installed or not on PATH")
@@ -280,9 +287,12 @@ def render_remotion_scenes(
                 rendered[scene_idx] = clip_path
             else:
                 print(f"   Scene {scene_idx} render failed")
-                stderr = result.stderr.strip().split("\n")[-3:]
-                for line in stderr:
-                    print(f"      {line.strip()}")
+                stderr = (result.stderr or "").strip().split("\n")
+                stdout = (result.stdout or "").strip().split("\n")
+                # Show last 10 lines of stderr + stdout to catch the real error
+                all_output = [l.strip() for l in (stderr + stdout) if l.strip()]
+                for line in all_output[-10:]:
+                    print(f"       {line}")
 
     return rendered
 
@@ -338,6 +348,9 @@ def merge_clips(
         audio_path = narration_audio.get(scene_idx)
         try:
             if audio_path and audio_path.exists():
+                # When audio exists: extend the last video frame to match audio duration
+                # tpad=stop_mode=clone:stop=-1 clones the last frame until audio ends
+                # This is safe because real audio files have finite duration
                 result = subprocess.run(
                     ["ffmpeg", "-y", "-i", str(clip_path), "-i", str(audio_path),
                      "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,tpad=stop_mode=clone:stop=-1",
@@ -345,7 +358,7 @@ def merge_clips(
                      "-pix_fmt", "yuv420p",
                      "-c:a", "aac", "-b:a", "192k",
                      "-map", "0:v:0", "-map", "1:a:0",
-                     "-shortest",
+                     "-movflags", "+faststart",
                      str(norm_path)],
                     capture_output=True,
                     text=True,
@@ -362,6 +375,7 @@ def merge_clips(
                      "-c:a", "aac", "-b:a", "192k",
                      "-map", "0:v:0", "-map", "1:a:0",
                      "-shortest",
+                     "-movflags", "+faststart",
                      str(norm_path)],
                     capture_output=True,
                     text=True,
@@ -410,7 +424,7 @@ def merge_clips(
 
     # Step 2: Concat normalized clips (all same format now, so -c copy works)
     concat_file = clips_dir / "concat.txt"
-    with open(concat_file, "w") as f:
+    with open(concat_file, "w", encoding="utf-8") as f:
         for clip_path in normalized_clips:
             f.write(f"file '{clip_path.resolve().as_posix()}'\n")
 

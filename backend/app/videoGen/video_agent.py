@@ -205,7 +205,7 @@ Create a video about the following topic:
         return root_tsx, comp_tsx
 
     def _default_root_tsx(self, scenes: list[dict]) -> str:
-        """Fallback Root.tsx."""
+        """Fallback Root.tsx — supports imports from both MyComp and separate fallback files."""
         compositions = ""
         for s in scenes:
             compositions += f"""
@@ -218,10 +218,25 @@ Create a video about the following topic:
                 fps={{30}}
             />"""
 
-        imports = ", ".join(s['comp_name'] for s in scenes)
-        return f"""import {{Composition}} from 'remotion';
-import {{{imports}}} from './MyComp';
-
+        # Group imports by source file
+        mycomp_imports = []
+        fallback_imports = {}  # filename -> [comp_names]
+        for s in scenes:
+            if s.get("_fallback_file"):
+                fb_file = s["_fallback_file"]
+                if fb_file not in fallback_imports:
+                    fallback_imports[fb_file] = []
+                fallback_imports[fb_file].append(s['comp_name'])
+            else:
+                mycomp_imports.append(s['comp_name'])
+        
+        import_lines = "import {Composition} from 'remotion';\n"
+        if mycomp_imports:
+            import_lines += f"import {{{', '.join(mycomp_imports)}}} from './MyComp';\n"
+        for fb_file, comp_names in fallback_imports.items():
+            import_lines += f"import {{{', '.join(comp_names)}}} from './{fb_file}';\n"
+        
+        return f"""{import_lines}
 export const RemotionRoot: React.FC = () => {{
     return (
         <>{compositions}

@@ -112,12 +112,49 @@ class MyScene(Scene):
 
 ### Common Pitfalls to Avoid
 
-1. **Version confusion** - Ensure you're using `manim` (Community)
-2. **Check imports** - `from manim import *` is ManimCE
-3. **Outdated tutorials** - Video tutorials may be outdated; prefer official documentation
-4. **manimpango issues** - If text rendering fails, check manimpango installation requirements
-5. **PATH issues (Windows)** - If `manim` command not found, use `python -m manim` or check PATH
-6. **Square vs Rectangle arguments** - `Square()` only accepts `side_length`. It DOES NOT accept `width` or `height`. If you need to specify `width` and `height`, use `Rectangle()` instead!
+#### General
+1. **Version confusion** — Ensure you're using `manim` (Community Edition), NOT `manimgl` or `manimlib`
+2. **Check imports** — `from manim import *` is ManimCE. If you see `from manimlib import *`, that's ManimGL (wrong!)
+3. **Outdated tutorials** — Many YouTube tutorials use ManimGL syntax. Always check against official ManimCE docs
+4. **manimpango issues** — If text rendering fails, check manimpango installation requirements
+5. **PATH issues (Windows)** — If `manim` command not found, use `python -m manim` or check PATH
+
+#### Constructor Argument Crashes
+6. **`Square()` arguments** — `Square()` ONLY accepts `side_length`. NEVER pass `width` or `height`. Use `Rectangle(width=w, height=h)` if you need both dimensions.
+7. **`Dot3D` keyword** — Use `Dot3D(center=...)` or positional `Dot3D(pos)`. Do NOT use `Dot3D(point=...)`.
+8. **`Arrow` with zero length** — If `start == end`, Arrow crashes. Always ensure start and end differ.
+
+#### Color Crashes
+9. **`interpolate_color` with strings** — NEVER pass raw hex strings (e.g. `"#FF0000"`) to `interpolate_color()`. It crashes: `'str' object has no attribute 'interpolate'`. Wrap with `ManimColor("#FF0000")` first, or use built-in constants like `RED`, `BLUE`.
+10. **Tuple colors** — NEVER use `color=(1, 0, 0)`. Use ManimCE color constants or hex strings.
+11. **Safe gradient** — Use `color_gradient([RED, BLUE], n)` which returns a list of proper ManimColor objects.
+
+#### Camera Crashes
+12. **`self.camera.frame` in `Scene`** — Only `MovingCameraScene` has `.camera.frame`. Using it in a regular `Scene` will crash immediately.
+13. **`self.camera.animate`** — Camera has NO `.animate` proxy in standard `Scene`. Only `MovingCameraScene` supports `self.camera.frame.animate`.
+14. **`self.camera.auto_zoom()`** — This does NOT exist in ManimCE. Scale mobjects instead.
+15. **Camera zoom/pan** — If you need it, inherit from `MovingCameraScene` and use `self.camera.frame.animate.set(width=...)`.
+
+#### Renamed / Removed APIs
+16. **`ShowCreation()`** — Renamed to `Create()` in ManimCE. `ShowCreation` will crash.
+17. **`GrowArrow()`** — Crashes with custom colors. Always use `Create(arrow)` instead.
+18. **`DrawBorderThenFill()` on Text** — Use `Write()` for Text and MathTex objects.
+19. **`InteractiveScene`** — Does not exist. Use `Scene`.
+20. **`self.embed()` / `self.frame`** — Not supported in ManimCE at all.
+21. **`.hide()`** — Does not exist. Use `.set_opacity(0)` instead.
+
+#### Rate Function Errors
+22. **`exponential_decay`** — Goes from 1→0, NOT 0→1! Animations using it as rate_func will play backwards or crash with negative scale. Use `smooth`, `rush_into`, or `there_and_back` instead.
+23. **CSS-style rate_func names** — names like `ease_out_sine`, `ease_in_out`, `ease_in_cubic` do NOT exist in ManimCE! Valid functions: `smooth`, `linear`, `rush_into`, `rush_from`, `slow_into`, `there_and_back`, `there_and_back_with_pause`, `running_start`, `wiggle`. When unsure, use `smooth`.
+
+#### 3D Scene Errors
+23. **3D without ThreeDScene** — To use 3D objects (Sphere, Surface, etc.), inherit from `ThreeDScene`, not `Scene`.
+24. **Text in 3D** — Always call `self.add_fixed_in_frame_mobjects(text)` for text overlays in 3D. Without it, text renders in 3D space and may be invisible.
+25. **Too many 3D objects** — Creating >200 small Dot3D objects in a loop will be extremely slow. Keep 3D object counts under 100.
+26. **Camera orientation** — Use `self.set_camera_orientation(phi=..., theta=...)` at the start of a ThreeDScene.
+
+#### Determinism
+27. **Non-deterministic randomness** — Always call `np.random.seed(42)` at the top of `construct()` if using `np.random`. Without it, renders may differ between runs and debugging becomes impossible.
 
 ### Installation
 

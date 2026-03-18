@@ -181,16 +181,31 @@ def main():
                         _, comp_tsx = fallback
                         
                         remotion_dir = output_dir / "remotion"
-                        comp_path = remotion_dir / "MyComp.tsx"
-                        if comp_path.exists():
-                            existing_comp = comp_path.read_text(encoding="utf-8")
-                            comp_tsx = existing_comp + "\n\n" + comp_tsx
-
+                        scene_idx = failed_scene["index"]
+                        comp_name = failed_scene["comp_name"]  # e.g. Scene04Comp
+                        
+                        # --- SAVE AS A SEPARATE FILE ---
+                        # Instead of merging into MyComp.tsx (which breaks everything),
+                        # save each fallback component to its own file.
+                        fallback_filename = f"Fallback{scene_idx:02d}.tsx"
+                        fallback_path = remotion_dir / fallback_filename
+                        fallback_path.write_text(comp_tsx, encoding="utf-8")
+                        print(f"   Saved fallback: {fallback_filename}")
+                        
+                        # Copy fallback file to Remotion project src/
+                        import shutil
+                        dest = Path(config.VIDEO_GEN_DIR) / "my-video" / "src" / fallback_filename
+                        shutil.copy2(fallback_path, dest)
+                        
                         if failed_scene not in result["remotion_scenes"]:
                             result["remotion_scenes"].append(failed_scene)
+                        
+                        # Track which scenes come from separate fallback files
+                        failed_scene["_fallback_file"] = fallback_filename.replace(".tsx", "")
                             
+                        # Rebuild Root.tsx with imports from BOTH MyComp AND fallback files
                         root_tsx = agent._default_root_tsx(result["remotion_scenes"])
-                        save_remotion_files(output_dir, root_tsx, comp_tsx)
+                        save_remotion_files(output_dir, root_tsx, None)  # Don't overwrite MyComp.tsx
                         
                         fallback_clip = render_remotion_scenes(
                             output_dir, [failed_scene]
