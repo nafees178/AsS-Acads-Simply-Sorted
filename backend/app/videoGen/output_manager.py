@@ -7,7 +7,9 @@ import sys
 import os
 import re
 import shutil
+import shutil
 import subprocess
+import concurrent.futures
 from pathlib import Path
 from datetime import datetime
 
@@ -124,56 +126,63 @@ def render_manim_scenes(
     rendered = {}
     failed = []
 
-    for scene in manim_scenes:
+    def _render(scene):
         class_name = scene["class_name"]
         scene_idx = scene["index"]
         clip_path = clips_dir / f"clip_{scene_idx:02d}.mp4"
-
-        print(f"\n   Rendering Manim Scene {scene_idx}: {class_name}...")
-
+        print(f"\n   [Thread] Rendering Manim Scene {scene_idx}: {class_name}...")
         try:
             result = subprocess.run(
-                [sys.executable, "-m", "manim", "-qh", "scene.py", class_name],
+                [sys.executable, "-m", "manim", "-qh", f"--media_dir=media_{scene_idx}", "scene.py", class_name],
                 cwd=str(output_dir),
                 env=env,
                 capture_output=True,
                 text=True,
                 timeout=300,
             )
+            return scene, result, clip_path, None
+        except subprocess.TimeoutExpired:
+            return scene, None, clip_path, "timeout"
+        except FileNotFoundError:
+            return scene, None, clip_path, "not_found"
+        except Exception as e:
+            return scene, None, clip_path, str(e)
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {executor.submit(_render, scene): scene for scene in manim_scenes}
+        for future in concurrent.futures.as_completed(futures):
+            scene, result, clip_path, err = future.result()
+            scene_idx = scene["index"]
+            class_name = scene["class_name"]
+
+            if err == "timeout":
+                print(f"   Scene {scene_idx} timed out — will fall back to Remotion")
+                failed.append((scene, "Manim render timed out (>300s)"))
+                continue
+            elif err == "not_found":
+                print(f"   Scene {scene_idx} failed: Manim not installed or not on PATH")
+                failed.append((scene, "Manim not installed or not on PATH"))
+                continue
+            elif err:
+                failed.append((scene, err))
+                continue
 
             if result.returncode == 0:
-                # Find rendered MP4
-                media_dir = output_dir / "media" / "videos" / "scene" / "1080p60"
+                media_dir = output_dir / f"media_{scene_idx}" / "videos" / "scene" / "1080p60"
                 mp4_files = list(media_dir.glob(f"{class_name}.mp4")) if media_dir.exists() else []
                 if mp4_files:
                     shutil.copy2(mp4_files[0], clip_path)
                     print(f"   Rendered: clip_{scene_idx:02d}.mp4")
                     rendered[scene_idx] = clip_path
                 else:
-                    print(f"   Scene {scene_idx} rendered but MP4 not found — will fall back to Remotion")
+                    print(f"   Scene {scene_idx} rendered but MP4 not found")
                     failed.append((scene, "MP4 file not found after successful render"))
             else:
                 error_text = result.stderr.strip() or result.stdout.strip()
                 error_lines = error_text.split("\n")[-30:]
                 error_summary = "\n".join(error_lines)
-
                 print(f"   Scene {scene_idx} FAILED — will fall back to Remotion")
-                for line in error_lines[-2:]:
-                    print(f"      {line.strip()}")
-
                 failed.append((scene, error_summary))
-
-        except subprocess.TimeoutExpired:
-            print(f"   Scene {scene_idx} timed out — will fall back to Remotion")
-            failed.append((scene, "Manim render timed out (>300s)"))
-        except FileNotFoundError:
-            print("   Manim not installed or not on PATH — all remaining scenes will fall back")
-            # Mark this and all remaining scenes as failed
-            failed.append((scene, "Manim not installed or not on PATH"))
-            remaining = [s for s in manim_scenes if s["index"] > scene_idx]
-            for s in remaining:
-                failed.append((s, "Manim not installed or not on PATH"))
-            break
 
     return rendered, failed
 
@@ -218,19 +227,11 @@ def render_remotion_scenes(
     clips_dir = output_dir / "clips"
     rendered = {}
 
-    for scene in remotion_scenes:
+    def _render(scene):
         comp_id = scene["comp_id"]
         scene_idx = scene["index"]
         clip_path = clips_dir / f"clip_{scene_idx:02d}.mp4"
-
         print(f"\n   Rendering Remotion Scene {scene_idx}: {comp_id}...")
-
-        # Sanity check: is this ID in Root.tsx?
-        if root_tsx.exists():
-            root_content = root_tsx.read_text(encoding="utf-8")
-            if f'id="{comp_id}"' not in root_content and f"id='{comp_id}'" not in root_content:
-                print(f"      WARNING: Composition ID '{comp_id}' not found in Root.tsx! Rendering will likely fail.")
-
         try:
             result = subprocess.run(
                 ["npx", "remotion", "render", comp_id, str(clip_path.resolve())],
@@ -240,28 +241,48 @@ def render_remotion_scenes(
                 timeout=600,
                 shell=True,
             )
+            return scene, result, clip_path, None
+        except subprocess.TimeoutExpired:
+            return scene, None, clip_path, "timeout"
+        except FileNotFoundError:
+            return scene, None, clip_path, "not_found"
+        except Exception as e:
+            return scene, None, clip_path, str(e)
 
-            if result.returncode == 0 and clip_path.exists():
+    for scene in remotion_scenes:
+        comp_id = scene["comp_id"]
+        if root_tsx.exists():
+            root_content = root_tsx.read_text(encoding="utf-8")
+            if f'id="{comp_id}"' not in root_content and f"id='{comp_id}'" not in root_content:
+                print(f"      WARNING: Composition ID '{comp_id}' not found in Root.tsx!")
+
+        scene, result, clip_path, err = _render(scene)
+        scene_idx = scene["index"]
+
+        if err == "timeout":
+            print(f"   Scene {scene_idx} timed out")
+            continue
+        elif err == "not_found":
+            print("   npx/Node.js not installed")
+            return rendered
+        elif err:
+            print(f"   Scene {scene_idx} error: {err}")
+            continue
+
+        if result.returncode == 0 and clip_path.exists():
+            print(f"   Rendered: clip_{scene_idx:02d}.mp4")
+            rendered[scene_idx] = clip_path
+        else:
+            default_out = REMOTION_PROJECT / "out" / f"{comp_id}.mp4"
+            if default_out.exists():
+                shutil.copy2(default_out, clip_path)
                 print(f"   Rendered: clip_{scene_idx:02d}.mp4")
                 rendered[scene_idx] = clip_path
             else:
-                # Check default output location
-                default_out = REMOTION_PROJECT / "out" / f"{comp_id}.mp4"
-                if default_out.exists():
-                    shutil.copy2(default_out, clip_path)
-                    print(f"   Rendered: clip_{scene_idx:02d}.mp4")
-                    rendered[scene_idx] = clip_path
-                else:
-                    print(f"   Scene {scene_idx} render failed")
-                    stderr = result.stderr.strip().split("\n")[-3:]
-                    for line in stderr:
-                        print(f"      {line.strip()}")
-
-        except subprocess.TimeoutExpired:
-            print(f"   Scene {scene_idx} timed out")
-        except FileNotFoundError:
-            print("   npx/Node.js not installed")
-            return rendered
+                print(f"   Scene {scene_idx} render failed")
+                stderr = result.stderr.strip().split("\n")[-3:]
+                for line in stderr:
+                    print(f"      {line.strip()}")
 
     return rendered
 
@@ -310,20 +331,17 @@ def merge_clips(
     norm_dir.mkdir(exist_ok=True)
     normalized_clips = []
 
-    print(f"\n   Normalizing {len(ordered_clips)} clips...")
+    print(f"\n   Normalizing {len(ordered_clips)} clips in parallel...")
 
-    for i, (clip_path, scene_idx) in enumerate(zip(ordered_clips, ordered_indices)):
+    def _normalize(i, clip_path, scene_idx):
         norm_path = norm_dir / f"norm_{i:02d}.mp4"
         audio_path = narration_audio.get(scene_idx)
-
         try:
             if audio_path and audio_path.exists():
-                # Normalize video AND merge audio
-                # tpad clones the last frame so video extends to match audio length
                 result = subprocess.run(
                     ["ffmpeg", "-y", "-i", str(clip_path), "-i", str(audio_path),
                      "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1,tpad=stop_mode=clone:stop=-1",
-                     "-r", "30", "-c:v", "libx264", "-preset", "fast",
+                     "-r", "30", "-c:v", "libx264", "-preset", "ultrafast",
                      "-pix_fmt", "yuv420p",
                      "-c:a", "aac", "-b:a", "192k",
                      "-map", "0:v:0", "-map", "1:a:0",
@@ -335,12 +353,11 @@ def merge_clips(
                 )
                 suffix = " + audio"
             else:
-                # Normalize video only (silent)
                 result = subprocess.run(
                     ["ffmpeg", "-y", "-i", str(clip_path),
                      "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=44100",
                      "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2,setsar=1",
-                     "-r", "30", "-c:v", "libx264", "-preset", "fast",
+                     "-r", "30", "-c:v", "libx264", "-preset", "ultrafast",
                      "-pix_fmt", "yuv420p",
                      "-c:a", "aac", "-b:a", "192k",
                      "-map", "0:v:0", "-map", "1:a:0",
@@ -351,22 +368,40 @@ def merge_clips(
                     timeout=120,
                 )
                 suffix = " (silent)"
+            return i, result, norm_path, suffix, None
+        except Exception as e:
+            return i, None, norm_path, "", e
+
+    norm_results = {}
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {
+            executor.submit(_normalize, i, clip_path, scene_idx): i
+            for i, (clip_path, scene_idx) in enumerate(zip(ordered_clips, ordered_indices))
+        }
+        for future in concurrent.futures.as_completed(futures):
+            i, result, norm_path, suffix, err = future.result()
+            if err:
+                if isinstance(err, FileNotFoundError):
+                    print(f"   Clip {i+1}: ffmpeg not found on system PATH")
+                elif isinstance(err, subprocess.TimeoutExpired):
+                    print(f"   Clip {i+1}: ffmpeg timeout")
+                else:
+                    print(f"   Clip {i+1}: ffmpeg OS error ({err})")
+                continue
 
             if result.returncode == 0 and norm_path.exists():
-                normalized_clips.append(norm_path)
+                norm_results[i] = norm_path
                 print(f"   Clip {i+1}: normalized{suffix}")
             else:
                 print(f"   Clip {i+1}: normalization failed")
                 stderr = result.stderr.strip().split("\n")[-2:]
                 for line in stderr:
                     print(f"      {line.strip()}")
-        except FileNotFoundError:
-            print(f"   Clip {i+1}: ffmpeg not found on system PATH")
-        except subprocess.TimeoutExpired:
-            print(f"   Clip {i+1}: ffmpeg timeout")
-        except OSError as e:
-            # WinError 2/3 and other OS errors
-            print(f"   Clip {i+1}: ffmpeg OS error ({e})")
+
+    # Reconstruct in original order
+    for i in range(len(ordered_clips)):
+        if i in norm_results:
+            normalized_clips.append(norm_results[i])
 
     if not normalized_clips:
         print("   No clips could be normalized with ffmpeg.")

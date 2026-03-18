@@ -178,8 +178,20 @@ def main():
                         result["scene_plan"], failed_scene, error_text
                     )
                     if fallback:
-                        root_tsx, comp_tsx = fallback
+                        _, comp_tsx = fallback
+                        
+                        remotion_dir = output_dir / "remotion"
+                        comp_path = remotion_dir / "MyComp.tsx"
+                        if comp_path.exists():
+                            existing_comp = comp_path.read_text(encoding="utf-8")
+                            comp_tsx = existing_comp + "\n\n" + comp_tsx
+
+                        if failed_scene not in result["remotion_scenes"]:
+                            result["remotion_scenes"].append(failed_scene)
+                            
+                        root_tsx = agent._default_root_tsx(result["remotion_scenes"])
                         save_remotion_files(output_dir, root_tsx, comp_tsx)
+                        
                         fallback_clip = render_remotion_scenes(
                             output_dir, [failed_scene]
                         )

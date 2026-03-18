@@ -117,6 +117,7 @@ class MyScene(Scene):
 3. **Outdated tutorials** - Video tutorials may be outdated; prefer official documentation
 4. **manimpango issues** - If text rendering fails, check manimpango installation requirements
 5. **PATH issues (Windows)** - If `manim` command not found, use `python -m manim` or check PATH
+6. **Square vs Rectangle arguments** - `Square()` only accepts `side_length`. It DOES NOT accept `width` or `height`. If you need to specify `width` and `height`, use `Rectangle()` instead!
 
 ### Installation
 

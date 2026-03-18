@@ -161,6 +161,7 @@ Then generate production-ready code for both engines.
 - NEVER use `InteractiveScene` — ManimCE uses `Scene` only
 - NEVER use `self.embed()` — not supported in ManimCE
 - NEVER use `self.frame` — not supported in ManimCE
+- NEVER use `width` or `height` parameters for `Square()`. `Square` ONLY takes `side_length`. Use `Rectangle(width=..., height=...)` if you need both.
 - For camera zoom: use `self.play(self.camera.auto_zoom(mobjects))` or scale the mobjects
 - For camera movement: move mobjects instead (e.g., `group.animate.shift(LEFT*2)`)
 - For fade to black: use `self.play(*[FadeOut(m) for m in self.mobjects])`

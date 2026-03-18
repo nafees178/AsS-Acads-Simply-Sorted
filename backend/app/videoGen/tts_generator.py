@@ -7,6 +7,7 @@ Uses the Windows SAPI5 voices (or espeak on Linux/Mac).
 
 import pyttsx3
 import sys
+import concurrent.futures
 from pathlib import Path
 
 # Explicit sys.path injection for standalone execution resilience
@@ -105,21 +106,27 @@ def generate_scene_narrations(
     audio_dir.mkdir(exist_ok=True)
     generated = {}
 
-    for scene in scenes:
+    def _generate_for_scene(scene):
         idx = scene["index"]
         script = narration_scripts.get(idx, "")
         if not script:
-            continue
+            return idx, None, ""
 
         wav_path = audio_dir / f"narration_{idx:02d}.wav"
         print(f"   Scene {idx}: Generating narration ({len(script)} chars)...")
-
         result = generate_narration(script, wav_path)
-        if result:
-            size_kb = result.stat().st_size / 1024
-            print(f"   Scene {idx}: Audio saved ({size_kb:.0f} KB)")
-            generated[idx] = result
-        else:
-            print(f"   Scene {idx}: TTS failed")
+        return idx, result, script
+
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = {executor.submit(_generate_for_scene, scene): scene for scene in scenes}
+        for future in concurrent.futures.as_completed(futures):
+            idx, result, script = future.result()
+            if script:
+                if result:
+                    size_kb = result.stat().st_size / 1024
+                    print(f"   Scene {idx}: Audio saved ({size_kb:.0f} KB)")
+                    generated[idx] = result
+                else:
+                    print(f"   Scene {idx}: TTS failed")
 
     return generated
