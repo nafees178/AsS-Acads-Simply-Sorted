@@ -1,5 +1,5 @@
 """
-Lorenz Attractor - Converted from 3b1b ManimGL to ManimCE
+Lorenz Attractor
 
 Original: videos/_2024/manim_demo/lorenz.py
 This demonstrates a chaotic system visualization with 3D curves and tracing dots.

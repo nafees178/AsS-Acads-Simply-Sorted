@@ -63,7 +63,6 @@ def load_manim_knowledge(skills_dir: str | Path) -> str:
     skill_folders = [
         ("manim-composer", "VIDEO PLANNING (MANIM COMPOSER)"),
         ("manimce-best-practices", "MANIM COMMUNITY EDITION — BEST PRACTICES"),
-        ("manimgl-best-practices", "MANIM GL (3b1b) — BEST PRACTICES"),
     ]
 
     sections = []
@@ -146,6 +145,7 @@ Then generate production-ready code for both engines.
 - Title cards, intro/outro sequences
 
 ## MANIM CODE RULES (CRITICAL)
+- STRICTLY use Manim Community Edition (Manim CE). DO NOT use ManimGL, manimlib, or any 3b1b-specific features. Only write code compatible with `manim` (the CE version).
 - Use `from manim import *` (ManimCE only)
 - NEVER use `.hide()` — use `.set_opacity(0)` instead
 - Always use raw strings for LaTeX: `MathTex(r"\\frac{{1}}{{2}}")`
@@ -154,13 +154,13 @@ Then generate production-ready code for both engines.
 - Must run with: `manim -qh scene.py Scene01_Title`
 
 ## MANIM FORBIDDEN PATTERNS (THESE WILL CRASH — DO NOT USE)
-- NEVER use `self.camera.frame` — this is ManimGL only, not ManimCE
+- NEVER use `self.camera.frame` — this is not supported in ManimCE
 - NEVER use `self.camera.animate.set_opacity()` — Camera has no animate
 - NEVER use `ShowCreation()` — use `Create()` instead (ManimCE name)
 - NEVER use `GrowArrow()` on arrows with custom colors — it crashes in some ManimCE versions. ALWAYS use `Create(arrow)` instead.
 - NEVER use `InteractiveScene` — ManimCE uses `Scene` only
-- NEVER use `self.embed()` — ManimGL only
-- NEVER use `self.frame` — ManimGL only
+- NEVER use `self.embed()` — not supported in ManimCE
+- NEVER use `self.frame` — not supported in ManimCE
 - For camera zoom: use `self.play(self.camera.auto_zoom(mobjects))` or scale the mobjects
 - For camera movement: move mobjects instead (e.g., `group.animate.shift(LEFT*2)`)
 - For fade to black: use `self.play(*[FadeOut(m) for m in self.mobjects])`
@@ -272,6 +272,7 @@ Based on the scene plan, generate ManimCE Python code for these SPECIFIC scenes:
 {scene_descriptions}
 
 ## REQUIREMENTS
+- STRICTLY use Manim CE (`manim`). No ManimGL/3b1b code allowed!
 - `from manim import *`
 - Create a SEPARATE Scene class for EACH scene listed above
 - Class names MUST be exactly: {', '.join(s['class_name'] for s in manim_scenes)}

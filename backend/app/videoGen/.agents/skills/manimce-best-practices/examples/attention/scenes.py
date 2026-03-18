@@ -1,5 +1,5 @@
 """
-Attention Mechanism Visualization - Converted from 3b1b ManimGL to ManimCE
+Attention Mechanism Visualization
 
 Original: videos/_2024/transformers/attention.py
 Demonstrates the attention mechanism used in transformers.
@@ -300,7 +300,6 @@ class MultiHeadedAttention(ThreeDScene):
     """
     Explains multi-head attention mechanism with 3D visualization.
     Shows multiple attention heads arranged in depth with camera rotation.
-    Inspired by 3b1b's transformer visualization.
     """
 
     def construct(self):

@@ -1,5 +1,5 @@
 """
-Attention Visualization Helpers - Converted from 3b1b ManimGL to ManimCE
+Attention Visualization Helpers
 
 Original: videos/_2024/transformers/helpers.py
 Contains utility functions and classes for attention visualization.

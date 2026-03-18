@@ -360,12 +360,18 @@ def merge_clips(
                 stderr = result.stderr.strip().split("\n")[-2:]
                 for line in stderr:
                     print(f"      {line.strip()}")
-        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-            print(f"   Clip {i+1}: ffmpeg error ({e})")
+        except FileNotFoundError:
+            print(f"   Clip {i+1}: ffmpeg not found on system PATH")
+        except subprocess.TimeoutExpired:
+            print(f"   Clip {i+1}: ffmpeg timeout")
+        except OSError as e:
+            # WinError 2/3 and other OS errors
+            print(f"   Clip {i+1}: ffmpeg OS error ({e})")
 
     if not normalized_clips:
-        print("   No clips could be normalized")
-        return None
+        print("   No clips could be normalized with ffmpeg.")
+        print("   Attempting basic binary concatenation fallback...")
+        return _binary_concat_fallback(ordered_clips, final_path)
 
     # Step 2: Concat normalized clips (all same format now, so -c copy works)
     concat_file = clips_dir / "concat.txt"
@@ -397,9 +403,10 @@ def merge_clips(
                 print(f"      {line.strip()}")
             return None
 
-    except FileNotFoundError:
-        print("   ffmpeg not found")
-        return None
+    except (FileNotFoundError, OSError):
+        print("   ffmpeg not found or failed")
+        print("   Attempting basic binary concatenation fallback...")
+        return _binary_concat_fallback(normalized_clips, final_path)
     except subprocess.TimeoutExpired:
         print("   Merge timed out")
         return None
